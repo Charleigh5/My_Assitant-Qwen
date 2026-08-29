@@ -242,7 +242,47 @@ class MusicEngine {
   private stateListeners = new Set<(playing: boolean) => void>();
   private levelBuf: Uint8Array | null = null;
   private pendingVolume = 0.85;
+  private streamDest: MediaStreamAudioDestinationNode | null = null;
+  private recorder: MediaRecorder | null = null;
+  private recChunks: Blob[] = [];
+  private recTitle = "orbit-take";
   isPlaying = false;
+  recording = false;
+
+  get exportSupported() {
+    return typeof MediaRecorder !== "undefined";
+  }
+
+  startRecording(title: string): boolean {
+    this.ensure();
+    if (!this.streamDest || this.recording || !this.exportSupported) return false;
+    this.recChunks = [];
+    this.recTitle = title;
+    const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? "audio/webm;codecs=opus"
+      : "audio/webm";
+    this.recorder = new MediaRecorder(this.streamDest.stream, { mimeType: mime });
+    this.recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) this.recChunks.push(e.data);
+    };
+    this.recording = true;
+    this.recorder.start(250);
+    return true;
+  }
+
+  stopRecording(): Promise<{ url: string; title: string } | null> {
+    return new Promise((resolve) => {
+      const rec = this.recorder;
+      if (!rec || !this.recording) return resolve(null);
+      rec.onstop = () => {
+        const blob = new Blob(this.recChunks, { type: rec.mimeType || "audio/webm" });
+        this.recording = false;
+        this.recorder = null;
+        resolve({ url: URL.createObjectURL(blob), title: this.recTitle });
+      };
+      rec.stop();
+    });
+  }
 
   private ensure() {
     if (this.ctx) return;
@@ -263,6 +303,10 @@ class MusicEngine {
     master.connect(comp);
     comp.connect(analyser);
     analyser.connect(ctx.destination);
+    if (typeof MediaStreamAudioDestinationNode !== "undefined") {
+      this.streamDest = ctx.createMediaStreamDestination();
+      analyser.connect(this.streamDest);
+    }
     this.master = master;
     this.analyser = analyser;
     this.levelBuf = new Uint8Array(analyser.frequencyBinCount);

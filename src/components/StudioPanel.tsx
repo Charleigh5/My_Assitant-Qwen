@@ -35,6 +35,22 @@ export default function StudioPanel({ track, persona, onGenerate, onTrackChange 
   const [step, setStep] = useState(-1);
   const [playing, setPlaying] = useState(engine.isPlaying);
   const [vol, setVol] = useState(0.85);
+  const [rec, setRec] = useState(false);
+  const [take, setTake] = useState<{ url: string; title: string } | null>(null);
+
+  const toggleRec = () => {
+    if (rec) {
+      engine.stopRecording().then((t) => {
+        setTake(t);
+        setRec(false);
+      });
+    } else {
+      if (engine.startRecording(track?.title ?? "orbit-take")) {
+        setRec(true);
+        if (!engine.isPlaying && track) engine.play(track);
+      }
+    }
+  };
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const accentRef = useRef(persona.accent);
   accentRef.current = persona.accent;
@@ -256,6 +272,40 @@ export default function StudioPanel({ track, persona, onGenerate, onTrackChange 
           <RegenIcon />
           GENERATE
         </button>
+
+        {engine.exportSupported && (
+          <>
+            <button
+              onClick={toggleRec}
+              title="Record the master bus to a downloadable take"
+              className="flex items-center gap-1.5 border px-2.5 py-1.5 font-mono text-[10px] tracking-widest transition-all active:scale-95"
+              style={{
+                borderColor: rec ? "#ff5d5d" : "#213843",
+                color: rec ? "#ff5d5d" : "#8cacac",
+                background: rec ? "rgba(255,93,93,0.1)" : "transparent",
+              }}
+            >
+              <span
+                className={`inline-block h-2 w-2 rounded-full ${rec ? "blink" : ""}`}
+                style={{ background: rec ? "#ff5d5d" : "#66868a" }}
+              />
+              {rec ? "REC…" : "REC"}
+            </button>
+            {take && !rec && (
+              <a
+                href={take.url}
+                download={`${take.title.toLowerCase().replace(/\s+/g, "-")}.webm`}
+                className="flex items-center gap-1.5 border border-lyra/60 px-2.5 py-1.5 font-mono text-[10px] tracking-widest text-lyra transition-all hover:-translate-y-px hover:shadow-[0_0_14px_rgba(155,225,93,0.35)]"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M12 3v12m0 0 4-4m-4 4-4-4" />
+                  <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+                </svg>
+                SAVE TAKE
+              </a>
+            )}
+          </>
+        )}
 
         <div className="flex items-center gap-1">
           {GENRES.map((g) => {

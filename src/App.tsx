@@ -89,16 +89,41 @@ function ModuleRow({
 
 /* ==================================================================== */
 
+const store = {
+  get(k: string): string | null {
+    try {
+      return localStorage.getItem(k);
+    } catch {
+      return null;
+    }
+  },
+  set(k: string, v: string) {
+    try {
+      localStorage.setItem(k, v);
+    } catch {
+      /* storage unavailable */
+    }
+  },
+};
+
+export const FIELD_CAP = 36;
+
 export default function App() {
   /* ---------- state ---------- */
-  const [personaId, setPersonaId] = useState<PersonaId>("nova");
+  const [personaId, setPersonaId] = useState<PersonaId>(() => {
+    const s = store.get("orbit.persona");
+    return s === "nova" || s === "ember" || s === "atlas" || s === "lyra" ? (s as PersonaId) : "nova";
+  });
   const [mood, setMood] = useState<Mood>("idle");
   const [track, setTrack] = useState<Track | null>(null);
   const [playing, setPlaying] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [typing, setTyping] = useState(false);
   const [input, setInput] = useState("");
-  const [tab, setTab] = useState<DockTab>("studio");
+  const [tab, setTab] = useState<DockTab>(() => {
+    const s = store.get("orbit.tab");
+    return s === "gallery" || s === "forge" ? (s as DockTab) : "studio";
+  });
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [imagesBusy, setImagesBusy] = useState<string | null>(null);
   const [objects, setObjects] = useState<SceneObject[]>([]);
@@ -108,7 +133,7 @@ export default function App() {
   const [handsStatus, setHandsStatus] = useState<HandStatus>("off");
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState<string | null>(null);
-  const [voiceOut, setVoiceOut] = useState(false);
+  const [voiceOut, setVoiceOut] = useState(() => store.get("orbit.voice") === "1");
   const [speaking, setSpeaking] = useState(false);
 
   /* ---------- refs ---------- */
@@ -121,7 +146,7 @@ export default function App() {
   const trackRef = useRef<Track | null>(null);
   const objectsRef = useRef<SceneObject[]>([]);
   const pinnedRef = useRef<PinnedImage[]>([]);
-  const voiceOutRef = useRef(false);
+  const voiceOutRef = useRef(store.get("orbit.voice") === "1");
   const listeningRef = useRef(false);
   const handsOnRef = useRef(false);
 
@@ -132,6 +157,27 @@ export default function App() {
   useEffect(() => { pinnedRef.current = pinned; }, [pinned]);
 
   const persona = getPersona(personaId);
+
+  /* ---------- persistence ---------- */
+  useEffect(() => {
+    store.set("orbit.persona", personaId);
+    store.set("orbit.voice", voiceOut ? "1" : "0");
+    store.set("orbit.tab", tab);
+  }, [personaId, voiceOut, tab]);
+
+  /* ---------- keyboard transport ---------- */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || e.repeat) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      e.preventDefault();
+      if (engine.isPlaying) engine.stop();
+      else if (trackRef.current) engine.play(trackRef.current);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   /* ---------- primitives ---------- */
 
@@ -314,7 +360,7 @@ export default function App() {
         case "music":
         case "regenerate": {
           const genre = intent === "regenerate" && trackRef.current ? trackRef.current.genre : det.genre;
-          const seed = intent === "regenerate" && trackRef.current ? undefined : undefined;
+          const seed = undefined; // fresh seed every take — remixes never repeat
           const t = playNew(genre, seed);
           reply(musicLine(pid, { title: t.title, genre: GENRE_LABEL[t.genre], bpm: t.bpm, key: `${t.rootName} ${t.scaleName}` }));
           return;
@@ -374,6 +420,11 @@ export default function App() {
           return;
         }
         case "spawn": {
+          if (objectsRef.current.length >= FIELD_CAP) {
+            reply(`The field is saturated — ${FIELD_CAP} objects is my ergonomic limit. Say "clear" and I'll sweep the deck.`);
+            addLog("field at capacity");
+            return;
+          }
           const shape = det.shape ?? (pick(["gem", "torus", "sphere", "cube", "knot"]) as ShapeKind);
           const color = det.color ?? FORGE_COLORS[Math.floor(Math.random() * FORGE_COLORS.length)];
           spawnObject(shape, color);
@@ -801,7 +852,7 @@ export default function App() {
 
           {/* control hint */}
           <p className="pointer-events-none absolute bottom-4 right-5 z-10 font-mono text-[7.5px] tracking-[0.2em] text-mist-600">
-            DRAG ORBIT · SCROLL ZOOM · {handsStatus === "active" ? "PINCH GRABS OBJECTS" : "“HANDS ON” FOR WEBCAM CONTROL"}
+            DRAG ORBIT · SPACE · PLAY/STOP · {handsStatus === "active" ? "PINCH GRABS OBJECTS" : "“HANDS ON” FOR WEBCAM CONTROL"}
           </p>
 
           {handsOn && handsEngineRef.current && (
@@ -839,6 +890,10 @@ export default function App() {
               <ObjectForge
                 objects={objects}
                 onSpawn={(shape, color) => {
+                  if (objectsRef.current.length >= FIELD_CAP) {
+                    addLog("field at capacity");
+                    return;
+                  }
                   spawnObject(shape, color);
                   addLog(`forged ${shape} from the dock`);
                 }}

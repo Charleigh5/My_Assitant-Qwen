@@ -275,7 +275,7 @@ class StageBoundary extends Component<{ children: ReactNode }, { error: string |
       return (
         <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
           <p className="font-mono text-[10px] tracking-[0.3em] text-ember">CORE VIEWPORT FAULT</p>
-          <code className="max-w-md border border-ink-600 bg-ink-950/70 px-3 py-2 font-mono text-[9px] leading-relaxed text-mist-300">
+          <code className="max-w-full break-words border border-ink-600 bg-ink-950/70 px-3 py-2 font-mono text-[9px] leading-relaxed text-mist-300">
             {this.state.error}
           </code>
           <p className="max-w-sm font-mono text-[8px] leading-relaxed tracking-[0.12em] text-mist-600">
@@ -1416,7 +1416,7 @@ function AppInner() {
                 ? focusPoint
                   ? `ON DECK · ${focusPoint.label.toUpperCase()}`
                   : "ON DECK · GLOBAL OBSERVATION"
-                : "MAP · WEATHER · SEISMIC · SATS · FEEDS"
+                : "MAP · WEATHER · SATS · CORE PERSISTS AS PIP"
             }
             right={
               <button
@@ -1592,24 +1592,98 @@ function AppInner() {
             if (e.dataTransfer.files?.length) importFiles(e.dataTransfer.files);
           }}
         >
+          {/* assistant stage — full viewport in core mode, live PIP core feed on the deck */}
           <div
-            className={`absolute inset-0 transition-opacity duration-500 ${
-              viewMode === "gods" ? "pointer-events-none opacity-0" : "opacity-100"
+            className={`absolute flex flex-col ${
+              viewMode === "gods"
+                ? "pip-in origin-bottom-right bottom-4 right-4 z-40 h-[244px] w-[348px] border bg-ink-900/95"
+                : "inset-0"
             }`}
+            style={
+              viewMode === "gods"
+                ? {
+                    borderColor: alpha(persona.accent, 0.5),
+                    boxShadow: `0 24px 60px -20px rgba(0,0,0,0.85), 0 0 34px -12px ${persona.accent}`,
+                  }
+                : undefined
+            }
           >
-            <StageBoundary>
-              <Assistant3D
-                persona={persona}
-                mood={mood}
-                beatRef={beatRef}
-                handRef={handFrameRef}
-                objects={objects}
-                pinned={pinned}
-                onObjectMove={onObjectMove}
-                onPinnedMove={onPinnedMove}
-                onCorePulse={onCorePulse}
-              />
-            </StageBoundary>
+            {/* PIP chrome — always rendered (h-0 in core) so the Canvas subtree never remounts */}
+            <div
+              className={`flex shrink-0 items-center justify-between gap-2 overflow-hidden border-b px-2.5 transition-all duration-300 ${
+                viewMode === "gods" ? "h-7 border-ink-700/70" : "h-0 border-transparent"
+              }`}
+            >
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span className="pulse-dot h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: persona.accent }} />
+                <span className="truncate font-mono text-[8px] tracking-[0.22em] text-mist-300">
+                  CORE FEED · <span style={{ color: persona.accent }}>{persona.name}</span>
+                </span>
+                <span className="font-mono text-[7px] tracking-[0.18em] text-mist-600">
+                  {mood === "djing" ? "ON DECKS" : mood === "talking" ? "SPEAKING" : mood === "thinking" ? "THINKING" : "IDLE"}
+                </span>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {track && engine.isPlaying && (
+                  <div className="eq-live flex h-3 items-end gap-[2px]">
+                    {[0, 1, 2].map((i) => (
+                      <span
+                        key={i}
+                        className="eq-bar w-[2.5px]"
+                        style={{ height: `${6 + (i % 2) * 4}px`, background: persona.accent, animationDelay: `${i * 0.13}s` }}
+                      />
+                    ))}
+                  </div>
+                )}
+                <button
+                  onClick={() => {
+                    setViewMode("core");
+                    addLog("core feed expanded to full viewport");
+                  }}
+                  title="Expand core to full viewport"
+                  aria-label="Expand core to full viewport"
+                  className="border p-1 transition-all hover:-translate-y-px"
+                  style={{ borderColor: `${persona.accent}55`, color: persona.accent, background: alpha(persona.accent, 0.08) }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div className="relative min-h-0 flex-1">
+              <StageBoundary>
+                <Assistant3D
+                  persona={persona}
+                  mood={mood}
+                  beatRef={beatRef}
+                  handRef={handFrameRef}
+                  objects={objects}
+                  pinned={pinned}
+                  onObjectMove={onObjectMove}
+                  onPinnedMove={onPinnedMove}
+                  onCorePulse={onCorePulse}
+                />
+              </StageBoundary>
+
+              {/* PIP corner ticks + LIVE badge */}
+              {viewMode === "gods" && (
+                <>
+                  <span className="pointer-events-none absolute left-1 top-1 h-2.5 w-2.5 border-l border-t" style={{ borderColor: persona.accent }} />
+                  <span className="pointer-events-none absolute right-1 top-1 h-2.5 w-2.5 border-r border-t" style={{ borderColor: persona.accent }} />
+                  <span className="pointer-events-none absolute bottom-1 left-1 h-2.5 w-2.5 border-b border-l" style={{ borderColor: persona.accent }} />
+                  <span className="pointer-events-none absolute bottom-1 right-1 h-2.5 w-2.5 border-b border-r" style={{ borderColor: persona.accent }} />
+                  <span
+                    className="pointer-events-none absolute left-2 top-2 flex items-center gap-1 px-1.5 py-0.5 font-mono text-[7px] tracking-[0.2em]"
+                    style={{ background: "rgba(11,19,23,0.8)", color: persona.accent }}
+                  >
+                    <span className="blink h-1 w-1 rounded-full" style={{ background: persona.accent }} />
+                    LIVE
+                  </span>
+                </>
+              )}
+            </div>
           </div>
 
           {/* file drop overlay */}

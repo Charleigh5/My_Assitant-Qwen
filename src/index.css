@@ -179,6 +179,12 @@ input[type="range"]::-moz-range-thumb {
 }
 .rise-in { animation: rise-in 0.5s cubic-bezier(0.2, 0.8, 0.3, 1) both; }
 
+@keyframes pip-in {
+  from { opacity: 0; transform: translateY(18px) scale(0.82); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.pip-in { animation: pip-in 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.18) both; }
+
 @keyframes stamp-in {
   0% { transform: scale(2.4) rotate(-14deg); opacity: 0; }
   60% { transform: scale(0.9) rotate(-7deg); opacity: 1; }

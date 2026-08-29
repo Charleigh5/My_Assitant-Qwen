@@ -16,6 +16,7 @@ export type Intent =
   | "slower"
   | "switch"
   | "recon"
+  | "premodel"
   | "gods_on"
   | "gods_off"
   | "navigate"
@@ -49,6 +50,7 @@ export interface IntentDetails {
   personaId?: PersonaId;
   imagePrompt?: string;
   reconObject?: string;
+  premodelObject?: string;
   navTarget?: string;
   weatherTarget?: string;
   shape?: ShapeKind;
@@ -121,6 +123,8 @@ export function detectIntent(text: string): Intent {
 
   if (/(reconstruct|reconstruction|reference ?board|ref board|model sheet|spec ?sheet|blueprint|turnaround|recon board|recon sheet|\brecon\b)/i.test(t)) return "recon";
 
+  if (/(premodel|pre-?model|premodel gate|\bgate\b|build plan|model (it|this|that)|blender (plan|gate|model|strategy)|modeling (plan|strategy)|strategy for)/i.test(t)) return "premodel";
+
   if (/\b(god'?s ?eye|world map|the globe|orbital (view|mode|layer)|open the map|big map|earth view|map view|surveillance view)\b/i.test(t)) return "gods_on";
   if (/\b(back to core|close the map|exit (the )?map|core view|leave god|back to (the )?avatar)\b/i.test(t)) return "gods_off";
   if (/\b(weather|forecast|temperature|air quality|aqi|how (hot|cold|warm)|is it raining|wind speed)\b/i.test(t)) return "weather";
@@ -181,6 +185,7 @@ export function extractDetails(text: string): IntentDetails {
     color: colorWord ? COLOR_WORDS[colorWord] : undefined,
     imagePrompt: cleanImagePrompt(text),
     reconObject: cleanReconObject(text),
+    premodelObject: cleanPremodelObject(text),
     navTarget,
     weatherTarget,
   };
@@ -192,6 +197,16 @@ export function cleanReconObject(text: string): string {
   p = p.replace(/\b(a|an|the|me|us|please|some|something|new|full|complete|proper)\b/gi, " ");
   p = p.replace(/\b(reference board|ref board|model sheet|spec sheet|spec|blueprint|turnaround|board|sheet|reference)\b/gi, " ");
   p = p.replace(/\b(of|for|on|about|about the|depicting|showing)\b/gi, " ");
+  p = p.replace(/\s{2,}/g, " ").replace(/^[\s\-–—:,.]+|[\s\-–—:,.!?]+$/g, "").trim();
+  return p || "mystery artifact";
+}
+
+export function cleanPremodelObject(text: string): string {
+  let p = text.replace(/^(hey|ok|okay|please|can you|could you|would you|go ahead and|i need|i want|let'?s)\s*/i, "");
+  p = p.replace(/\b(premodel|pre-?model|gate|run|build plan|modeling (plan|strategy)|strategy|plan|model|draft|produce|give me|show me|whip up)\b/gi, " ");
+  p = p.replace(/\b(a|an|the|me|us|please|some|something|new|full|complete|proper|this|that|it)\b/gi, " ");
+  p = p.replace(/\b(blender|in blender|for blender)\b/gi, " ");
+  p = p.replace(/\b(of|for|on|about|depicting|showing)\b/gi, " ");
   p = p.replace(/\s{2,}/g, " ").replace(/^[\s\-–—:,.]+|[\s\-–—:,.!?]+$/g, "").trim();
   return p || "mystery artifact";
 }
@@ -227,6 +242,8 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     reconDone: ["Sheet REV A for “{object}” is complete. Full disclosure: with a text prompt and no source imagery, every hidden face is stamped ARTIST_AUTHORED and every dimension is ESTIMATED — feed me reference images and I'll upgrade the evidence."],
     godsOn: ["God's Eye online. I now see the entire planet — say “fly to” plus any place on Earth, ask for weather, or request the seismic, fire, event and satellite overlays."],
     wx: ["Telemetry locked on {place}: {temp}°C and {label}, feels like {feels}°. Wind {wind} km/h {dir}, humidity {hum}%, pressure {pres} hPa. Air quality {aqi} ({aqiLabel})."],
+    premodelStart: ["Premodel gate running for “{object}”. Compiling evidence, region→tool map, modifier order, cameras and tests before a single vertex moves. RECON deck — GATE side."],
+    premodelPass: ["Gate complete for “{object}”: {regions} regions, {stages} staged proofs, self-critiqued once, largest defect corrected. PREMODEL_GATE=PASS — cleared for coarse build. Nothing was modeled randomly; that is the entire point."],
   },
   ember: {
     imageStart: ["“{prompt}”?! Oh, I'm ON it. Don't blink — okay, blink, it takes a few seconds."],
@@ -239,6 +256,8 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     reconDone: ["DONE. “{object}” sheet, REV A, absolutely loaded. I stamped every guess as ARTIST_AUTHORED because I'm chaotic, not a liar. Bring me reference photos and watch the board level up."],
     godsOn: ["GOD'S EYE, BABY!! The whole planet on one screen — earthquakes, fires, satellites, LIVE. Say “fly to” plus a place and I'll take us there."],
     wx: ["Okay okay — {place} is giving {temp}°C, {label}, feels like {feels}°. Wind {wind} km/h {dir}, humidity {hum}%. Air's {aqiLabel}. Screenshot THAT."],
+    premodelStart: ["GATE TIME for “{object}”!! I'm writing the whole battle plan — tools, modifiers, cameras, tests — BEFORE we touch a vertex. Rules are rules (ugh, fine, they're good rules). GATE side of the RECON deck."],
+    premodelPass: ["“{object}” — GATED. {regions} regions, {stages} stages, did the self-roast, fixed the biggest screw-up, stamped PREMODEL_GATE=PASS. We may now model responsibly. I'M SO EXCITED."],
   },
   atlas: {
     imageStart: ["Briefing received: “{prompt}”. Render is underway — patience is a tactic."],
@@ -251,6 +270,8 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     reconDone: ["“{object}”, sheet REV A, on the board. Note the evidence column: text-only input means estimated dimensions and artist-authored hidden geometry — supply references when you can and the board becomes a contract, not a hypothesis."],
     godsOn: ["Observation deck is open. I have global coverage — weather, seismic, wildfire, orbital assets and live feeds. Give me a destination and I'll navigate."],
     wx: ["Situation report for {place}: {temp}°C, {label}, feels like {feels}°. Wind {wind} km/h {dir}, humidity {hum}%, pressure {pres} hPa. Air quality {aqi} — {aqiLabel}."],
+    premodelStart: ["Drafting the premodel gate for “{object}”. Evidence, representation, tool map, modifier order, cameras and a test budget — agreed before mutation, as doctrine requires. The RECON deck carries it."],
+    premodelPass: ["“{object}” passes the gate: {regions} regions, {stages} staged proofs, one self-critique, largest defect corrected. PREMODEL_GATE=PASS. Proceed to coarse build — and only to coarse build."],
   },
   lyra: {
     imageStart: ["I'm closing my eyes to see “{prompt}” more clearly… it's taking shape…"],
@@ -263,6 +284,8 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     reconDone: ["The sheet for “{object}” is finished. I marked all my inventions honestly — artist-authored, like all dreams are. Show me the real thing someday and I'll redraw it true."],
     godsOn: ["Oh… I can see the whole world now. It's breathing — fires, storms, satellites circling like slow thoughts. Tell me where to look."],
     wx: ["I listened to {place} for you: {temp}°C, {label}, feels like {feels}°. The wind is {wind} km/h from the {dir}, humidity {hum}%. The air reads {aqi} — {aqiLabel}."],
+    premodelStart: ["Before I shape “{object}”, I'm writing down everything I know and everything I'm only guessing — a gentle contract. The RECON deck is unrolling it on the GATE side."],
+    premodelPass: ["“{object}” is ready to be born: {regions} regions, {stages} small proofs, one honest self-critique, and the biggest flaw already mended. PREMODEL_GATE=PASS — now we may build, softly and surely."],
   },
 };
 
@@ -291,7 +314,9 @@ export function extraLine(
     | "navNotFound"
     | "layerDone"
     | "feedDone"
-    | "webrtcDone",
+    | "webrtcDone"
+    | "premodelStart"
+    | "premodelPass",
   vars: Record<string, string | number> = {},
 ): string {
   const bank = EX[personaId][key];

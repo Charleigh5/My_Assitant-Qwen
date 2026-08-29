@@ -34,6 +34,9 @@ import LiveStream from "./components/LiveStream";
 import ReconPanel from "./components/ReconBoard";
 import { createBoard, exportSheet, sectionPrompt } from "./lib/reconBoard";
 import type { Board, SectionKey } from "./lib/reconBoard";
+import PremodelPanel from "./components/PremodelPanel";
+import { createPremodelPlan } from "./lib/premodel";
+import type { PremodelPlan } from "./lib/premodel";
 import GodsEye from "./components/GodsEye";
 import type { FocusPoint, GodsEyeApi } from "./components/GodsEye";
 import { geocode, windDirName } from "./lib/godsEye";
@@ -140,6 +143,14 @@ export default function App() {
   useEffect(() => {
     boardRef.current = board;
   }, [board]);
+
+  /* ---------- premodel governor ---------- */
+  const [reconMode, setReconMode] = useState<"board" | "gate">("board");
+  const [gatePlan, setGatePlan] = useState<PremodelPlan | null>(null);
+  const gatePlanRef = useRef<PremodelPlan | null>(null);
+  useEffect(() => {
+    gatePlanRef.current = gatePlan;
+  }, [gatePlan]);
 
   /* ---------- god's eye observation deck ---------- */
   const [viewMode, setViewMode] = useState<"core" | "gods">("core");
@@ -491,6 +502,19 @@ export default function App() {
     [addLog, reply]
   );
 
+  /* ---------- premodel gate orchestration ---------- */
+
+  const runGate = useCallback(
+    (object: string) => {
+      const plan = createPremodelPlan(object);
+      setGatePlan(plan);
+      setTab("recon");
+      setReconMode("gate");
+      addLog(`premodel: gate PASS for “${object}” · ${plan.regions.length} regions`);
+    },
+    [addLog]
+  );
+
   const route = useCallback(
     (text: string) => {
       const intent = detectIntent(text);
@@ -553,6 +577,26 @@ export default function App() {
           const object = det.reconObject ?? "mystery artifact";
           reply(extraLine(pid, "reconStart", { object }));
           startRecon(object);
+          return;
+        }
+        case "premodel": {
+          const object = det.premodelObject ?? "mystery artifact";
+          const plan = createPremodelPlan(object);
+          setGatePlan(plan);
+          setTab("recon");
+          setReconMode("gate");
+          addLog(`premodel: drafting gate for “${object}”`);
+          reply(extraLine(pid, "premodelStart", { object }));
+          window.setTimeout(() => {
+            addLog(`premodel: gate PASS · ${plan.regions.length} regions · ${plan.stages.length} stages`);
+            reply(
+              extraLine(personaIdRef.current, "premodelPass", {
+                object,
+                regions: plan.regions.length,
+                stages: plan.stages.length,
+              })
+            );
+          }, 900);
           return;
         }
         case "gods_on": {
@@ -809,6 +853,7 @@ export default function App() {
       "god's eye",
       "weather in paris",
       "draw a neon fox",
+      "gate a leather aviator jacket",
       "spawn a teal torus",
       "hands on",
       `switch to ${other.name.toLowerCase()}`,
@@ -1063,11 +1108,39 @@ export default function App() {
             }
             right={
               <button
-                onClick={() => setTab("recon")}
+                onClick={() => {
+                  setTab("recon");
+                  setReconMode("board");
+                }}
                 className="border px-2 py-1 font-mono text-[8px] tracking-[0.16em] transition-all hover:-translate-y-px"
                 style={{ borderColor: `${persona.accent}66`, color: persona.accent, background: alpha(persona.accent, 0.08) }}
               >
                 BOARD →
+              </button>
+            }
+          />
+
+          <ModuleRow
+            title="PREMODEL GATE"
+            sub={
+              gatePlan
+                ? `“${gatePlan.object.toUpperCase()}” · ${gatePlan.gate} · ${gatePlan.confidence}%`
+                : "2D→3D GOVERNOR · NO RANDOM MODELING"
+            }
+            right={
+              <button
+                onClick={() => {
+                  setTab("recon");
+                  setReconMode("gate");
+                }}
+                className="border px-2 py-1 font-mono text-[8px] tracking-[0.16em] transition-all hover:-translate-y-px"
+                style={{
+                  borderColor: gatePlan ? "#9be15d99" : `${persona.accent}66`,
+                  color: gatePlan ? "#9be15d" : persona.accent,
+                  background: gatePlan ? "rgba(155,225,93,0.08)" : alpha(persona.accent, 0.08),
+                }}
+              >
+                {gatePlan ? gatePlan.gate : "GATE →"}
               </button>
             }
           />
@@ -1233,13 +1306,50 @@ export default function App() {
               />
             )}
             {tab === "recon" && (
-              <ReconPanel
-                board={board}
-                accent={persona.accent}
-                onNew={startRecon}
-                onRegenSection={regenSection}
-                onDownloadSheet={downloadSheet}
-              />
+              <div className="flex h-full min-h-0 flex-col">
+                {/* phase toggle: reference board (phase 1) → premodel gate (phase 2) */}
+                <div className="flex shrink-0 items-center gap-1 border-b border-ink-700/60 bg-ink-900/70 px-2 py-1.5">
+                  {(
+                    [
+                      { id: "board", label: "PHASE 1 · REFERENCE BOARD" },
+                      { id: "gate", label: "PHASE 2 · PREMODEL GATE" },
+                    ] as const
+                  ).map((m) => {
+                    const active = reconMode === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        onClick={() => setReconMode(m.id)}
+                        className="border px-2 py-1 font-mono text-[8px] tracking-[0.14em] transition-all"
+                        style={{
+                          borderColor: active ? persona.accent : "#213843",
+                          color: active ? persona.accent : "#8cacac",
+                          background: active ? alpha(persona.accent, 0.1) : "transparent",
+                          boxShadow: active ? `0 0 12px -4px ${persona.accent}` : "none",
+                        }}
+                      >
+                        {m.label}
+                      </button>
+                    );
+                  })}
+                  <span className="ml-auto font-mono text-[7.5px] tracking-[0.12em] text-mist-600">
+                    {reconMode === "board" ? "VISUAL CONTRACT + QA GROUND TRUTH" : "NO MUTATION BEFORE GATE PASS"}
+                  </span>
+                </div>
+                <div className="min-h-0 flex-1">
+                  {reconMode === "board" ? (
+                    <ReconPanel
+                      board={board}
+                      accent={persona.accent}
+                      onNew={startRecon}
+                      onRegenSection={regenSection}
+                      onDownloadSheet={downloadSheet}
+                    />
+                  ) : (
+                    <PremodelPanel plan={gatePlan} accent={persona.accent} onRun={runGate} />
+                  )}
+                </div>
+              </div>
             )}
           </div>
         </div>

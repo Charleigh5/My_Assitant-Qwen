@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useRef } from "react";
 import type { GeneratedImage } from "../lib/imageGen";
 import type { SceneObject, ShapeKind } from "../lib/sceneTypes";
 import { FORGE_COLORS, SHAPE_KINDS } from "../lib/sceneTypes";
@@ -67,6 +68,19 @@ export function DockBar({
 
 const PROMPT_IDEAS = ["a neon fox in the rain", "an orbital greenhouse at dusk", "a whale made of stained glass"];
 
+const UploadIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M12 16V4m0 0 4 4m-4-4-4 4" />
+    <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+  </svg>
+);
+
+const badgeFor = (img: GeneratedImage): { label: string; color: string } => {
+  if (img.method === "upload") return { label: img.kind === "video" ? "VIDEO · LOCAL" : "LOCAL FILE", color: "#54d8ff" };
+  if (img.method === "ai") return { label: "NEURAL", color: "#9be15d" };
+  return { label: "PROCEDURAL", color: "#f5b94b" };
+};
+
 export function GalleryPanel({
   images,
   busyPrompt,
@@ -74,6 +88,8 @@ export function GalleryPanel({
   onPin,
   onRemove,
   onPrompt,
+  onImport,
+  accent,
 }: {
   images: GeneratedImage[];
   busyPrompt: string | null;
@@ -81,7 +97,35 @@ export function GalleryPanel({
   onPin: (img: GeneratedImage) => void;
   onRemove: (id: string) => void;
   onPrompt: (p: string) => void;
+  onImport: (files: FileList) => void;
+  accent: string;
 }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const importControl = (
+    <>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*,video/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files?.length) onImport(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      <button
+        onClick={() => fileRef.current?.click()}
+        className="flex items-center gap-1.5 border px-2.5 py-1.5 font-mono text-[9px] tracking-[0.16em] transition-all hover:-translate-y-px"
+        style={{ borderColor: `${accent}77`, color: accent, background: `${accent}14` }}
+      >
+        <UploadIcon />
+        IMPORT FILES
+      </button>
+    </>
+  );
+
   if (!images.length && !busyPrompt) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
@@ -90,9 +134,12 @@ export function GalleryPanel({
           <circle cx="9" cy="9" r="2" />
           <path d="m21 15-3.5-3.5a2 2 0 0 0-2.8 0L6 20" />
         </svg>
-        <p className="max-w-sm font-mono text-[10px] leading-relaxed tracking-[0.12em] text-mist-500">
-          THE GALLERY IS EMPTY — TELL A CORE TO “DRAW” SOMETHING
+        <p className="max-w-md font-mono text-[10px] leading-relaxed tracking-[0.12em] text-mist-500">
+          EMPTY — TELL A CORE TO “DRAW” SOMETHING, IMPORT FILES, OR DROP IMAGES / VIDEOS ANYWHERE ON THE STAGE
         </p>
+        <div className="flex items-center gap-2">
+          {importControl}
+        </div>
         <div className="flex flex-wrap justify-center gap-1.5">
           {PROMPT_IDEAS.map((p) => (
             <button
@@ -109,60 +156,77 @@ export function GalleryPanel({
   }
 
   return (
-    <div className="flex h-full gap-2 overflow-x-auto p-2.5">
-      {busyPrompt && (
-        <div className="img-shimmer relative aspect-[8/5] w-44 shrink-0 overflow-hidden border border-ink-600">
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-3">
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-mist-500 border-t-transparent" />
-            <p className="w-full truncate text-center font-mono text-[8px] tracking-[0.14em] text-mist-500">
-              RENDERING · {busyPrompt.toUpperCase()}
-            </p>
-          </div>
-        </div>
-      )}
-      {images.map((img) => {
-        const pinned = pinnedIds.includes(img.id);
-        return (
-          <div
-            key={img.id}
-            className="group relative aspect-[8/5] w-44 shrink-0 overflow-hidden border border-ink-600 transition-colors hover:border-mist-500"
-            title={img.prompt}
-          >
-            <img src={img.src} alt={img.prompt} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110" />
-            <span
-              className="absolute left-1 top-1 px-1 font-mono text-[7px] tracking-[0.16em]"
-              style={{ background: "rgba(11,19,23,0.75)", color: img.method === "ai" ? "#9be15d" : "#f5b94b" }}
-            >
-              {img.method === "ai" ? "NEURAL" : "PROCEDURAL"}
-            </span>
-            <div className="absolute inset-x-0 bottom-0 flex translate-y-full items-center gap-1 bg-ink-950/90 p-1 transition-transform duration-200 group-hover:translate-y-0">
-              <button
-                onClick={() => onPin(img)}
-                disabled={pinned}
-                className="flex-1 border border-ink-600 px-1 py-0.5 font-mono text-[8px] tracking-[0.1em] text-mist-300 transition-colors hover:border-nova hover:text-nova disabled:opacity-40"
-              >
-                {pinned ? "PINNED" : "PIN TO 3D"}
-              </button>
-              <a
-                href={img.src}
-                download={`orbit-${img.seed}.png`}
-                target="_blank"
-                rel="noreferrer"
-                className="border border-ink-600 px-1.5 py-0.5 font-mono text-[8px] text-mist-300 transition-colors hover:border-mist-500 hover:text-mist-100"
-              >
-                SAVE
-              </a>
-              <button
-                onClick={() => onRemove(img.id)}
-                className="border border-ink-600 px-1.5 py-0.5 font-mono text-[8px] text-mist-500 transition-colors hover:border-ember hover:text-ember"
-                aria-label="Remove image"
-              >
-                ✕
-              </button>
+    <div className="flex h-full flex-col">
+      <div className="flex shrink-0 items-center gap-2 border-b border-ink-700/60 px-2.5 py-1.5">
+        {importControl}
+        <span className="font-mono text-[8px] tracking-[0.14em] text-mist-600">
+          {images.length} ITEM{images.length === 1 ? "" : "S"} · PINNED CARDS ARE DRAGGABLE — BY CURSOR OR BY HAND
+        </span>
+      </div>
+      <div className="flex min-h-0 flex-1 gap-2 overflow-x-auto p-2.5">
+        {busyPrompt && (
+          <div className="img-shimmer relative flex h-full w-52 shrink-0 flex-col overflow-hidden border border-ink-600">
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 px-3">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-mist-500 border-t-transparent" />
+              <p className="w-full truncate text-center font-mono text-[8px] tracking-[0.14em] text-mist-500">
+                RENDERING · {busyPrompt.toUpperCase()}
+              </p>
             </div>
           </div>
-        );
-      })}
+        )}
+        {images.map((img) => {
+          const isPinned = pinnedIds.includes(img.id);
+          const badge = badgeFor(img);
+          return (
+            <div
+              key={img.id}
+              className="group flex h-full w-52 shrink-0 flex-col overflow-hidden border border-ink-600 bg-ink-850/60 transition-all hover:-translate-y-0.5 hover:border-mist-500"
+              title={img.prompt}
+            >
+              <div className="relative min-h-0 flex-1 overflow-hidden bg-ink-950">
+                {img.kind === "video" ? (
+                  <video src={img.src} muted loop autoPlay playsInline className="h-full w-full object-cover" />
+                ) : (
+                  <img src={img.src} alt={img.prompt} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                )}
+                <span
+                  className="absolute left-1 top-1 px-1 py-0.5 font-mono text-[7px] tracking-[0.14em]"
+                  style={{ background: "rgba(11,19,23,0.8)", color: badge.color }}
+                >
+                  {badge.label}
+                </span>
+              </div>
+              <div className="flex shrink-0 items-center gap-1 border-t border-ink-700/60 p-1">
+                <button
+                  onClick={() => onPin(img)}
+                  disabled={isPinned}
+                  className="flex-1 border border-ink-600 px-1 py-1 font-mono text-[8px] tracking-[0.1em] text-mist-300 transition-colors hover:border-nova hover:text-nova disabled:opacity-40"
+                >
+                  {isPinned ? "IN SCENE ✓" : "PIN TO 3D"}
+                </button>
+                <a
+                  href={img.src}
+                  download={img.method === "upload" ? img.prompt : `orbit-${img.seed}.png`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="border border-ink-600 px-1.5 py-1 font-mono text-[8px] text-mist-300 transition-colors hover:border-mist-500 hover:text-mist-100"
+                  title="Download"
+                >
+                  SAVE
+                </a>
+                <button
+                  onClick={() => onRemove(img.id)}
+                  className="border border-ink-600 px-1.5 py-1 font-mono text-[8px] text-mist-500 transition-colors hover:border-ember hover:text-ember"
+                  aria-label="Remove item"
+                  title="Remove"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

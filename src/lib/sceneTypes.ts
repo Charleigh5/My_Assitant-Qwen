@@ -24,6 +24,9 @@ export interface PinnedImage {
   src: string;
   prompt: string;
   slot: number;
+  kind?: "image" | "video";
+  /** explicit world position → card stays put and is grabbable (mouse + hand) */
+  position?: [number, number, number];
 }
 
 export const FORGE_COLORS = [

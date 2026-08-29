@@ -1,7 +1,7 @@
-import { Canvas, useFrame, useThree, useLoader } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Float, MeshDistortMaterial, OrbitControls, Sparkles } from "@react-three/drei";
 import * as THREE from "three";
-import { Component, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { Component, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject, ReactNode } from "react";
 import type { Mood, Persona } from "../lib/personas";
 import { alpha } from "../lib/personas";
@@ -302,33 +302,93 @@ class TexBoundary extends Component<{ children: ReactNode }, { failed: boolean }
   }
 }
 
-function PinnedImagePlane({ pin, accent }: { pin: PinnedImage; accent: string }) {
-  const tex = useLoader(THREE.TextureLoader, pin.src);
+function PinnedImagePlane({
+  pin,
+  accent,
+  register,
+  onDown,
+}: {
+  pin: PinnedImage;
+  accent: string;
+  register: (id: string, g: THREE.Group | null) => void;
+  onDown: (e: any, id: string) => void;
+}) {
   const ref = useRef<THREE.Group>(null!);
+  const [tex, setTex] = useState<THREE.Texture | null>(null);
+
+  /* image or video texture — object URLs (uploads) and remote URLs both work */
+  useEffect(() => {
+    let stale = false;
+    let loaded: THREE.Texture | null = null;
+    if (pin.kind === "video") {
+      const v = document.createElement("video");
+      v.src = pin.src;
+      v.muted = true;
+      v.loop = true;
+      v.playsInline = true;
+      v.crossOrigin = "anonymous";
+      const t = new THREE.VideoTexture(v);
+      t.colorSpace = THREE.SRGBColorSpace;
+      loaded = t;
+      setTex(t);
+      void v.play().catch(() => undefined);
+      return () => {
+        v.pause();
+        v.removeAttribute("src");
+        v.load();
+        t.dispose();
+      };
+    }
+    new THREE.TextureLoader().load(pin.src, (t) => {
+      if (stale) {
+        t.dispose();
+        return;
+      }
+      t.colorSpace = THREE.SRGBColorSpace;
+      loaded = t;
+      setTex(t);
+    });
+    return () => {
+      stale = true;
+      loaded?.dispose();
+    };
+  }, [pin.src, pin.kind]);
+
+  /* register as grabbable (mouse drag + hand pinch) */
+  useEffect(() => {
+    register(pin.id, ref.current);
+    return () => register(pin.id, null);
+  }, [pin.id, register]);
+
   const angle = pin.slot * 1.02 + 0.55;
   const radius = 4.7;
   const baseY = 0.15 + (pin.slot % 3) * 0.62 - 0.4;
-  const pos = useMemo<[number, number, number]>(
+  const auto = useMemo<[number, number, number]>(
     () => [Math.sin(angle) * radius, baseY, Math.cos(angle) * radius],
     [angle, baseY, radius]
   );
+  const pos = pin.position ?? auto;
+  const placed = !!pin.position;
   const rotY = Math.atan2(pos[0], pos[2]);
 
   useFrame((state) => {
+    if (placed) return; // user-placed cards hold their position
     const t = state.clock.elapsedTime;
-    ref.current.position.y = baseY + Math.sin(t * 0.9 + pin.slot * 1.4) * 0.1;
+    ref.current.position.y = auto[1] + Math.sin(t * 0.9 + pin.slot * 1.4) * 0.1;
   });
 
   return (
-    <group ref={ref} position={pos} rotation={[0, rotY, 0]}>
+    <group ref={ref} position={pos} rotation={[0, rotY, 0]} onPointerDown={(e) => onDown(e, pin.id)}>
       <mesh position={[0, 0, -0.015]}>
         <planeGeometry args={[2.78, 1.84]} />
         <meshBasicMaterial color="#0b1317" />
       </mesh>
-      <mesh>
-        <planeGeometry args={[2.6, 1.64]} />
-        <meshBasicMaterial map={tex} toneMapped={false} />
-      </mesh>
+      {tex && (
+        <mesh>
+          <planeGeometry args={[2.6, 1.64]} />
+          <meshBasicMaterial map={tex} toneMapped={false} side={THREE.DoubleSide} />
+        </mesh>
+      )}
       <mesh position={[0, -0.96, 0]}>
         <boxGeometry args={[2.78, 0.055, 0.02]} />
         <meshBasicMaterial color={accent} />
@@ -337,6 +397,12 @@ function PinnedImagePlane({ pin, accent }: { pin: PinnedImage; accent: string })
         <boxGeometry args={[2.78, 0.02, 0.02]} />
         <meshBasicMaterial color={accent} transparent opacity={0.4} />
       </mesh>
+      {pin.kind === "video" && (
+        <mesh position={[1.12, 0.68, 0.02]} rotation={[0, 0, -Math.PI / 2]}>
+          <coneGeometry args={[0.1, 0.17, 3]} />
+          <meshBasicMaterial color={accent} />
+        </mesh>
+      )}
     </group>
   );
 }
@@ -365,6 +431,7 @@ function Scene({
   objects,
   pinned,
   onObjectMove,
+  onPinnedMove,
   onCorePulse,
 }: {
   persona: Persona;
@@ -374,6 +441,7 @@ function Scene({
   objects: SceneObject[];
   pinned: PinnedImage[];
   onObjectMove: (id: string, pos: [number, number, number]) => void;
+  onPinnedMove?: (id: string, pos: [number, number, number]) => void;
   onCorePulse: () => void;
 }) {
   const { camera, gl } = useThree();
@@ -402,6 +470,16 @@ function Scene({
     if (g) registry.current.set(id, g);
     else registry.current.delete(id);
   }, []);
+
+  /* route drag/grab releases: pinned holograms vs forged objects */
+  const pinnedIds = useMemo(() => new Set(pinned.map((p) => p.id)), [pinned]);
+  const emitMove = useCallback(
+    (id: string, pos: [number, number, number]) => {
+      if (pinnedIds.has(id)) onPinnedMove?.(id, pos);
+      else onObjectMove(id, pos);
+    },
+    [pinnedIds, onObjectMove, onPinnedMove]
+  );
 
   useEffect(() => {
     for (const o of objects) {
@@ -452,7 +530,7 @@ function Scene({
     const up = () => {
       if (!drag.current) return;
       const g = registry.current.get(drag.current.id);
-      if (g) onObjectMove(drag.current.id, [g.position.x, g.position.y, g.position.z]);
+      if (g) emitMove(drag.current.id, [g.position.x, g.position.y, g.position.z]);
       drag.current = null;
       if (controls.current) controls.current.enabled = true;
       document.body.style.cursor = "";
@@ -463,7 +541,7 @@ function Scene({
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };
-  }, [camera, gl, raycaster, tmp, onObjectMove]);
+  }, [camera, gl, raycaster, tmp, emitMove]);
 
   /* ---- per-frame: hand cursor, hand grab, object animation ---- */
   useFrame((state, dt) => {
@@ -529,7 +607,7 @@ function Scene({
     if (handGrab.current) {
       const g = registry.current.get(handGrab.current.id);
       if (!hand.present || !hand.pinched || !g) {
-        if (g) onObjectMove(handGrab.current.id, [g.position.x, g.position.y, g.position.z]);
+        if (g) emitMove(handGrab.current.id, [g.position.x, g.position.y, g.position.z]);
         handGrab.current = null;
       } else {
         tmp.ndc.set(hand.x * 2 - 1, -(hand.y * 2 - 1));
@@ -571,7 +649,7 @@ function Scene({
       <Suspense fallback={null}>
         {pinned.map((p) => (
           <TexBoundary key={p.id}>
-            <PinnedImagePlane pin={p} accent={persona.accent} />
+            <PinnedImagePlane pin={p} accent={persona.accent} register={register} onDown={onDown} />
           </TexBoundary>
         ))}
       </Suspense>
@@ -619,6 +697,7 @@ export default function Assistant3D({
   objects,
   pinned,
   onObjectMove,
+  onPinnedMove,
   onCorePulse,
 }: {
   persona: Persona;
@@ -628,6 +707,7 @@ export default function Assistant3D({
   objects: SceneObject[];
   pinned: PinnedImage[];
   onObjectMove: (id: string, pos: [number, number, number]) => void;
+  onPinnedMove?: (id: string, pos: [number, number, number]) => void;
   onCorePulse: () => void;
 }) {
   return (
@@ -643,6 +723,7 @@ export default function Assistant3D({
         objects={objects}
         pinned={pinned}
         onObjectMove={onObjectMove}
+        onPinnedMove={onPinnedMove}
         onCorePulse={onCorePulse}
       />
     </Canvas>

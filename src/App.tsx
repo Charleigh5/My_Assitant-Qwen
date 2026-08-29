@@ -79,6 +79,146 @@ function Toggle({ on, onClick, accent, label }: { on: boolean; onClick: () => vo
   );
 }
 
+function MiniBtn({
+  label,
+  active,
+  activeColor = "#3fe0c5",
+  dot,
+  onClick,
+  children,
+}: {
+  label: string;
+  active?: boolean;
+  activeColor?: string;
+  dot?: string | null;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  const c = active ? activeColor : "#8cacac";
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className="relative flex h-9 w-9 shrink-0 items-center justify-center border transition-all hover:-translate-y-px"
+      style={{
+        borderColor: active ? `${activeColor}77` : "#1c313b",
+        color: c,
+        background: active ? `${activeColor}14` : "rgba(19,34,42,0.5)",
+      }}
+    >
+      {children}
+      {dot && <span className="pulse-dot absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full" style={{ background: dot }} />}
+    </button>
+  );
+}
+
+function RailMini({
+  accent,
+  personaId,
+  onPersona,
+  handsOn,
+  handsActive,
+  onHands,
+  listening,
+  onListen,
+  onTab,
+  viewMode,
+  onGods,
+  liveOpen,
+  onLive,
+  onImport,
+}: {
+  accent: string;
+  personaId: PersonaId;
+  onPersona: (id: PersonaId) => void;
+  handsOn: boolean;
+  handsActive: boolean;
+  onHands: () => void;
+  listening: boolean;
+  onListen: () => void;
+  onTab: (t: DockTab) => void;
+  viewMode: "core" | "gods";
+  onGods: () => void;
+  liveOpen: boolean;
+  onLive: () => void;
+  onImport: () => void;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-center gap-1.5 overflow-y-auto py-3 [scrollbar-width:none]">
+      {PERSONAS.map((p) => {
+        const active = p.id === personaId;
+        return (
+          <button
+            key={p.id}
+            onClick={() => onPersona(p.id)}
+            title={`${p.name} — ${p.role}`}
+            aria-label={`Switch to ${p.name}`}
+            className={`h-7 w-7 shrink-0 rounded-full border-2 transition-transform hover:scale-110 ${active ? "pulse-dot" : ""}`}
+            style={{
+              background: active ? p.accent : alpha(p.accent, 0.22),
+              borderColor: active ? "#eaf4f3" : alpha(p.accent, 0.55),
+            }}
+          />
+        );
+      })}
+      <div className="my-1 h-px w-7 shrink-0 bg-ink-700" />
+      <MiniBtn label="Barehands pinch control" active={handsOn} activeColor={accent} dot={handsActive ? accent : null} onClick={onHands}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M18 11V6.5a1.5 1.5 0 0 0-3 0V11" />
+          <path d="M15 10.5V4.8a1.5 1.5 0 0 0-3 0V10" />
+          <path d="M12 10V3.5a1.5 1.5 0 0 0-3 0V11" />
+          <path d="M9 11.5v-1a1.5 1.5 0 0 0-3 0V15a7 7 0 0 0 14 0v-4a1.5 1.5 0 0 0-3 0" />
+        </svg>
+      </MiniBtn>
+      <MiniBtn label="Voice link · microphone" active={listening} activeColor={accent} onClick={onListen}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <rect x="9" y="2" width="6" height="12" rx="3" />
+          <path d="M5 10a7 7 0 0 0 14 0M12 17v4" />
+        </svg>
+      </MiniBtn>
+      <MiniBtn label="Import images / videos to the scene" activeColor={accent} onClick={onImport}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M12 16V4m0 0 4 4m-4-4-4 4" />
+          <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+        </svg>
+      </MiniBtn>
+      <div className="my-1 h-px w-7 shrink-0 bg-ink-700" />
+      <MiniBtn label="Gallery dock" activeColor={accent} onClick={() => onTab("gallery")}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <circle cx="9" cy="9" r="2" />
+          <path d="m21 15-3.5-3.5a2 2 0 0 0-2.8 0L6 20" />
+        </svg>
+      </MiniBtn>
+      <MiniBtn label="Object forge dock" activeColor={accent} onClick={() => onTab("forge")}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden>
+          <path d="M12 2 21 7v10l-9 5-9-5V7l9-5z" />
+          <path d="M12 12 21 7M12 12v10M12 12 3 7" />
+        </svg>
+      </MiniBtn>
+      <MiniBtn label="Recon deck" activeColor={accent} onClick={() => onTab("recon")}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6M9 13h6M9 17h4" />
+        </svg>
+      </MiniBtn>
+      <MiniBtn label="God's Eye observation deck" active={viewMode === "gods"} activeColor="#9be15d" onClick={onGods}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.7-3.8-9S9.5 5.6 12 3z" />
+        </svg>
+      </MiniBtn>
+      <MiniBtn label="Live stream monitor" active={liveOpen} activeColor="#ff5d5d" dot={liveOpen ? "#ff5d5d" : null} onClick={onLive}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <circle cx="12" cy="12" r="2.5" />
+          <path d="M7.8 16.2a6 6 0 0 1 0-8.4M16.2 7.8a6 6 0 0 1 0 8.4M4.9 19.1a10 10 0 0 1 0-14.2M19.1 4.9a10 10 0 0 1 0 14.2" />
+        </svg>
+      </MiniBtn>
+    </div>
+  );
+}
+
 function ModuleRow({
   title,
   sub,
@@ -136,6 +276,8 @@ export default function App() {
     const s = store.get("orbit.tab");
     return s === "gallery" || s === "forge" || s === "recon" ? (s as DockTab) : "studio";
   });
+  const [railOpen, setRailOpen] = useState(() => store.get("orbit.rail") === "1");
+  const importRef = useRef<HTMLInputElement>(null);
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [imagesBusy, setImagesBusy] = useState<string | null>(null);
   const [board, setBoard] = useState<Board | null>(null);
@@ -199,7 +341,8 @@ export default function App() {
     store.set("orbit.persona", personaId);
     store.set("orbit.voice", voiceOut ? "1" : "0");
     store.set("orbit.tab", tab);
-  }, [personaId, voiceOut, tab]);
+    store.set("orbit.rail", railOpen ? "1" : "0");
+  }, [personaId, voiceOut, tab, railOpen]);
 
   /* ---------- keyboard transport ---------- */
   useEffect(() => {
@@ -403,7 +546,7 @@ export default function App() {
                         ...prev,
                         sections: prev.sections.map((s) =>
                           s.key === k
-                            ? { ...s, status: (gen.method === "ai" ? "done" : "fallback") as "done" | "fallback", src: gen.src, method: gen.method }
+                            ? { ...s, status: (gen.method === "ai" ? "done" : "fallback") as "done" | "fallback", src: gen.src, method: gen.method === "ai" ? "ai" as const : "procedural" as const }
                             : s,
                         ),
                       }
@@ -438,7 +581,7 @@ export default function App() {
               ...prev,
               sections: prev.sections.map((s) =>
                 s.key === key
-                  ? { ...s, status: (gen.method === "ai" ? "done" : "fallback") as "done" | "fallback", src: gen.src, method: gen.method }
+                  ? { ...s, status: (gen.method === "ai" ? "done" : "fallback") as "done" | "fallback", src: gen.src, method: gen.method === "ai" ? "ai" as const : "procedural" as const }
                   : s,
               ),
             }
@@ -791,12 +934,79 @@ export default function App() {
     (img: GeneratedImage) => {
       setPinned((prev) => {
         if (prev.some((x) => x.id === img.id)) return prev;
-        return [...prev.slice(-5), { id: img.id, src: img.src, prompt: img.prompt, slot: prev.length }];
+        const slot = prev.length;
+        const a = (slot % 8) * 0.785 + 0.4;
+        return [
+          ...prev.slice(-5),
+          {
+            id: img.id,
+            src: img.src,
+            prompt: img.prompt,
+            slot,
+            kind: img.kind,
+            position: [Math.sin(a) * 4.3, 0.25 + (slot % 3) * 0.55, Math.cos(a) * 4.3] as [number, number, number],
+          },
+        ];
       });
       addLog(`pinned to scene · “${img.prompt}”`);
     },
     [addLog]
   );
+
+  /* ---------- file import → live holograms ---------- */
+
+  const [dropHot, setDropHot] = useState(false);
+
+  const importFiles = useCallback(
+    (files: FileList | File[]) => {
+      const list = Array.from(files);
+      const newImgs: GeneratedImage[] = [];
+      const newPins: PinnedImage[] = [];
+      let skipped = 0;
+      list.forEach((f, i) => {
+        const isVideo = f.type.startsWith("video/");
+        const isImage = f.type.startsWith("image/");
+        if (!isVideo && !isImage) {
+          skipped++;
+          return;
+        }
+        const src = URL.createObjectURL(f);
+        const id = `up-${Date.now().toString(36)}-${i}-${Math.random().toString(36).slice(2, 6)}`;
+        const kind = isVideo ? "video" : "image";
+        newImgs.push({ id, src, prompt: f.name, seed: 0, method: "upload", kind });
+        const slot = pinnedRef.current.length + newPins.length;
+        const a = (slot % 8) * 0.785 + 0.35;
+        newPins.push({
+          id, // shared with the gallery entry → “IN SCENE” badge + joint removal
+          src,
+          prompt: f.name,
+          slot,
+          kind,
+          position: [Math.sin(a) * 4.2, 0.2 + (slot % 3) * 0.6, Math.cos(a) * 4.2],
+        });
+      });
+      if (!newImgs.length) {
+        addLog(skipped ? `import: ${skipped} unsupported file type(s) skipped` : "import: nothing to import");
+        return;
+      }
+      setImages((prev) => [...prev, ...newImgs]);
+      setPinned((prev) => [...prev, ...newPins]);
+      setTab("gallery");
+      addLog(`import: ${newImgs.length} file(s) live in the field`);
+      reply(
+        `${newImgs.length} file${newImgs.length > 1 ? "s" : ""} imported and floating in the field${
+          skipped ? ` (${skipped} unsupported skipped)` : ""
+        }. Drag ${newImgs.length > 1 ? "them" : "it"} with your cursor — or pinch ${
+          newImgs.length > 1 ? "them" : "it"
+        } out of the air with Barehands. Videos play live on their cards.`
+      );
+    },
+    [addLog, reply]
+  );
+
+  const onPinnedMove = useCallback((id: string, pos: [number, number, number]) => {
+    setPinned((prev) => prev.map((p) => (p.id === id ? { ...p, position: pos } : p)));
+  }, []);
 
   const onObjectMove = useCallback((id: string, pos: [number, number, number]) => {
     setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, position: pos } : o)));
@@ -883,26 +1093,52 @@ export default function App() {
       </div>
 
       {/* ============ LEFT · identity + modules + log ============ */}
-      <aside className="z-10 flex w-[266px] shrink-0 flex-col border-r border-ink-700/60 bg-ink-900/75 backdrop-blur-md">
-        <div className="border-b border-ink-700/60 px-4 py-4">
-          <div className="flex items-center gap-3">
-            <svg width="34" height="34" viewBox="0 0 34 34" fill="none" aria-hidden>
+      <aside
+        className={`z-10 flex shrink-0 flex-col overflow-hidden border-r border-ink-700/60 bg-ink-900/75 backdrop-blur-md transition-[width] duration-300 ${
+          railOpen ? "w-[266px]" : "w-[56px]"
+        }`}
+      >
+        <div className="flex shrink-0 items-center justify-between gap-1 border-b border-ink-700/60 px-3 py-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <svg
+              width={railOpen ? 34 : 28}
+              height={railOpen ? 34 : 28}
+              viewBox="0 0 34 34"
+              fill="none"
+              aria-hidden
+              className="shrink-0"
+            >
               <circle cx="17" cy="17" r="6" fill={persona.accent} opacity="0.9" />
               <circle cx="17" cy="17" r="6" fill="none" stroke="#eaf4f3" strokeOpacity="0.4" />
               <ellipse cx="17" cy="17" rx="14.5" ry="5.5" stroke={persona.accent} strokeOpacity="0.75" transform="rotate(-18 17 17)" />
               <circle cx="28.5" cy="11.5" r="1.8" fill="#eaf4f3" />
             </svg>
-            <div>
-              <h1 className="font-display text-[16px] font-extrabold leading-none tracking-[0.3em] text-mist-100">
-                ORBIT
-              </h1>
-              <p className="mt-1 font-mono text-[7.5px] tracking-[0.22em] text-mist-600">
-                FULLSTACK AGENT CONSOLE
-              </p>
-            </div>
+            {railOpen && (
+              <div className="min-w-0">
+                <h1 className="font-display text-[16px] font-extrabold leading-none tracking-[0.3em] text-mist-100">
+                  ORBIT
+                </h1>
+                <p className="mt-1 font-mono text-[7.5px] tracking-[0.22em] text-mist-600">
+                  FULLSTACK AGENT CONSOLE
+                </p>
+              </div>
+            )}
           </div>
+          <button
+            onClick={() => setRailOpen(!railOpen)}
+            title={railOpen ? "Collapse rail — widen the stage" : "Expand rail"}
+            aria-label={railOpen ? "Collapse rail" : "Expand rail"}
+            className="shrink-0 border border-ink-700 p-1 text-mist-500 transition-all hover:-translate-y-px hover:text-mist-100"
+            style={{ borderColor: railOpen ? "#213843" : `${persona.accent}66`, color: railOpen ? undefined : persona.accent }}
+          >
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              {railOpen ? <path d="M7.5 2 3.5 6l4 4" /> : <path d="m4.5 2 4 4-4 4" />}
+            </svg>
+          </button>
         </div>
 
+        {railOpen ? (
+          <>
         {/* personas */}
         <div className="border-b border-ink-700/60 px-3 py-3">
           <p className="px-1 pb-2 font-mono text-[8px] tracking-[0.26em] text-mist-600">CORE PERSONAS</p>
@@ -1166,11 +1402,52 @@ export default function App() {
             BAREHANDS LINKED
           </span>
         </div>
+          </>
+        ) : (
+          <RailMini
+            accent={persona.accent}
+            personaId={personaId}
+            onPersona={switchPersona}
+            handsOn={handsOn}
+            handsActive={handsStatus === "active"}
+            onHands={() => setHands(!handsOn)}
+            listening={listening}
+            onListen={() => setListen(!listening)}
+            onTab={setTab}
+            viewMode={viewMode}
+            onGods={() => {
+              setViewMode(viewMode === "gods" ? "core" : "gods");
+              addLog(viewMode === "gods" ? "god's eye: deck closed" : "god's eye: deck opened");
+            }}
+            liveOpen={liveOpen}
+            onLive={() => {
+              if (!handsOn) setHands(true);
+              setLiveOpen(true);
+              addLog("live stream monitor opened");
+            }}
+            onImport={() => importRef.current?.click()}
+          />
+        )}
       </aside>
 
       {/* ============ CENTER · stage + dock ============ */}
       <main className="z-10 flex min-w-0 flex-1 flex-col">
-        <div className="relative min-h-0 flex-1">
+        <div
+          className="relative min-h-0 flex-1"
+          onDragOver={(e) => {
+            e.preventDefault();
+            if (viewMode !== "gods") setDropHot(true);
+          }}
+          onDragLeave={(e) => {
+            if (e.currentTarget === e.target) setDropHot(false);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDropHot(false);
+            if (viewMode === "gods") return;
+            if (e.dataTransfer.files?.length) importFiles(e.dataTransfer.files);
+          }}
+        >
           <div
             className={`absolute inset-0 transition-opacity duration-500 ${
               viewMode === "gods" ? "pointer-events-none opacity-0" : "opacity-100"
@@ -1184,8 +1461,24 @@ export default function App() {
               objects={objects}
               pinned={pinned}
               onObjectMove={onObjectMove}
+              onPinnedMove={onPinnedMove}
               onCorePulse={onCorePulse}
             />
+          </div>
+
+          {/* file drop overlay */}
+          <div
+            className={`pointer-events-none absolute inset-2 z-20 flex items-center justify-center border-2 border-dashed transition-all duration-200 ${
+              dropHot ? "opacity-100" : "opacity-0"
+            }`}
+            style={{ borderColor: persona.accent, background: alpha(persona.accent, 0.06) }}
+          >
+            <div className="border bg-ink-950/90 px-6 py-4 text-center" style={{ borderColor: `${persona.accent}66` }}>
+              <p className="font-display text-[15px] font-bold tracking-[0.2em] text-mist-100">RELEASE TO MATERIALIZE</p>
+              <p className="mt-1 font-mono text-[9px] tracking-[0.18em]" style={{ color: persona.accent }}>
+                IMAGES + VIDEOS BECOME GRABBABLE HOLOGRAMS
+              </p>
+            </div>
           </div>
 
           <div className={`absolute inset-0 ${viewMode === "gods" ? "" : "pointer-events-none invisible"}`}>
@@ -1284,6 +1577,8 @@ export default function App() {
                   setPinned((prev) => prev.filter((p) => p.id !== id));
                 }}
                 onPrompt={(p) => sendMessage(`draw ${p}`)}
+                onImport={importFiles}
+                accent={persona.accent}
               />
             )}
             {tab === "forge" && (
@@ -1388,6 +1683,19 @@ export default function App() {
           }}
         />
       )}
+
+      {/* global file import (mini rail + keyboard-free path) */}
+      <input
+        ref={importRef}
+        type="file"
+        accept="image/*,video/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files?.length) importFiles(e.target.files);
+          e.target.value = "";
+        }}
+      />
     </div>
   );
 }

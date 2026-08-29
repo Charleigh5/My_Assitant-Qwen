@@ -8,7 +8,8 @@ export interface GeneratedImage {
   src: string;
   prompt: string;
   seed: number;
-  method: "ai" | "procedural";
+  method: "ai" | "procedural" | "upload";
+  kind?: "image" | "video";
 }
 
 const hash = (s: string) => {

@@ -27,8 +27,10 @@ import { BareHands, EMPTY_FRAME } from "./lib/hands";
 import type { HandFrame, HandStatus } from "./lib/hands";
 import { generateImage } from "./lib/imageGen";
 import type { GeneratedImage } from "./lib/imageGen";
-import { micSupported, speak, startListening, stopSpeaking, ttsSupported } from "./lib/voice";
-import type { RecognitionHandle } from "./lib/voice";
+import { micSupported, speak, startListening, stopSpeaking } from "./lib/voice";
+import type { RecognitionHandle, TtsEngine } from "./lib/voice";
+import { voiceLabelFor } from "./lib/voice";
+import LiveStream from "./components/LiveStream";
 import { FORGE_COLORS } from "./lib/sceneTypes";
 import type { PinnedImage, SceneObject, ShapeKind } from "./lib/sceneTypes";
 
@@ -134,6 +136,8 @@ export default function App() {
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState<string | null>(null);
   const [voiceOut, setVoiceOut] = useState(() => store.get("orbit.voice") === "1");
+  const [ttsEngine, setTtsEngine] = useState<{ engine: TtsEngine; label: string } | null>(null);
+  const [liveOpen, setLiveOpen] = useState(false);
   const [speaking, setSpeaking] = useState(false);
 
   /* ---------- refs ---------- */
@@ -500,17 +504,16 @@ export default function App() {
   const onRevealed = useCallback((id: string) => {
     const m = messagesRef.current.find((x) => x.id === id);
     if (!m || m.role !== "agent") return;
-    if (voiceOutRef.current && ttsSupported) {
+    if (voiceOutRef.current) {
       setMood("talking");
-      speak(
-        m.text,
-        m.personaId ?? personaIdRef.current,
-        () => setSpeaking(true),
-        () => {
+      speak(m.text, m.personaId ?? personaIdRef.current, {
+        onStart: () => setSpeaking(true),
+        onEnd: () => {
           setSpeaking(false);
           setMood(engine.isPlaying ? "djing" : "idle");
-        }
-      );
+        },
+        onEngine: (e, label) => setTtsEngine({ engine: e, label }),
+      });
     } else {
       setMood(engine.isPlaying ? "djing" : "idle");
     }
@@ -721,7 +724,11 @@ export default function App() {
                   ? "DUPLEX · SPEAKING ALOUD"
                   : "MIC LIVE · TALK TO ME"
                 : voiceOut
-                ? "AGENT VOICE ARMED"
+                ? ttsEngine
+                  ? ttsEngine.engine === "edge"
+                    ? `EDGE NEURAL · ${ttsEngine.label.toUpperCase()}`
+                    : `LOCAL TTS · ${ttsEngine.label.toUpperCase()}`
+                  : `ARMED · EDGE ${voiceLabelFor(personaId).label.toUpperCase()}`
                 : micSupported
                 ? "SPEECH IN + SPOKEN OUT"
                 : "NEEDS CHROME / EDGE"
@@ -732,6 +739,17 @@ export default function App() {
                 <Toggle on={listening} onClick={() => setListen(!listening)} accent={persona.accent} label="Toggle microphone" />
                 <span className="font-mono text-[7px] tracking-[0.14em] text-mist-600">VOX</span>
                 <Toggle on={voiceOut} onClick={toggleVoiceOut} accent={persona.accent} label="Toggle spoken replies" />
+                <span
+                  className="border px-1 py-0.5 font-mono text-[6.5px] tracking-[0.12em] transition-colors duration-500"
+                  style={{
+                    borderColor: ttsEngine?.engine === "edge" ? "#9be15d88" : "#213843",
+                    color: ttsEngine?.engine === "edge" ? "#9be15d" : "#66868a",
+                    background: ttsEngine?.engine === "edge" ? "rgba(155,225,93,0.07)" : "transparent",
+                  }}
+                  title={ttsEngine?.engine === "edge" ? "Microsoft Edge neural voice active" : ttsEngine ? "Local browser voice (Edge unreachable)" : "Engine resolves on first reply"}
+                >
+                  {ttsEngine?.engine === "edge" ? "EDGE" : ttsEngine?.engine === "local" ? "LOCL" : "NEUR"}
+                </span>
               </>
             }
           />
@@ -763,6 +781,31 @@ export default function App() {
                 style={{ borderColor: `${persona.accent}66`, color: persona.accent, background: alpha(persona.accent, 0.08) }}
               >
                 FORGE →
+              </button>
+            }
+          />
+
+          <ModuleRow
+            title="LIVE STREAM"
+            sub={
+              liveOpen
+                ? "BROADCAST MONITOR OPEN"
+                : handsStatus === "active"
+                ? "BAREHANDS FEED · READY TO AIR"
+                : "COMPOSITE · RECORD · SAVE THE HAND FEED"
+            }
+            right={
+              <button
+                onClick={() => {
+                  if (!handsOn) setHands(true);
+                  setLiveOpen(true);
+                  addLog("live stream monitor opened");
+                }}
+                className="flex items-center gap-1.5 border px-2 py-1 font-mono text-[8px] tracking-[0.16em] transition-all hover:-translate-y-px"
+                style={{ borderColor: liveOpen ? "#ff5d5d99" : `${persona.accent}66`, color: liveOpen ? "#ff5d5d" : persona.accent, background: liveOpen ? "rgba(255,93,93,0.08)" : alpha(persona.accent, 0.08) }}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${liveOpen ? "blink" : ""}`} style={{ background: liveOpen ? "#ff5d5d" : "currentColor" }} />
+                {liveOpen ? "ON AIR" : "GO LIVE →"}
               </button>
             }
           />
@@ -926,8 +969,22 @@ export default function App() {
           speaking={speaking}
           interim={interim}
           onRevealed={onRevealed}
+          voiceChip={voiceOut ? (ttsEngine ? `${ttsEngine.engine === "edge" ? "EDGE" : "LOCAL"} · ${ttsEngine.label.split(" ")[0].toUpperCase()}` : `NEURAL · ${voiceLabelFor(personaId).label.split(" ")[0].toUpperCase()}`) : null}
         />
       </section>
+
+      {/* ============ LIVE STREAM BROADCAST ============ */}
+      {liveOpen && handsEngineRef.current && (
+        <LiveStream
+          engine={handsEngineRef.current}
+          personaName={persona.name}
+          accent={persona.accent}
+          onClose={() => {
+            setLiveOpen(false);
+            addLog("live stream closed");
+          }}
+        />
+      )}
     </div>
   );
 }

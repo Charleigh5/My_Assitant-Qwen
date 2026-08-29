@@ -44,7 +44,8 @@ export class BareHands {
   canvas: HTMLCanvasElement | null = null;
   accent = "#3fe0c5";
 
-  private video: HTMLVideoElement | null = null;
+  /** public so the live-stream compositor can mirror the feed */
+  video: HTMLVideoElement | null = null;
   private landmarker: any = null;
   private stream: MediaStream | null = null;
   private raf = 0;
@@ -178,7 +179,10 @@ export class BareHands {
     this.draw(lms);
   };
 
+  private lastLms: { x: number; y: number }[] | null = null;
+
   private draw(lms: { x: number; y: number }[] | null) {
+    this.lastLms = lms;
     const cv = this.canvas;
     if (!cv) return;
     const g = cv.getContext("2d");
@@ -186,6 +190,20 @@ export class BareHands {
     const W = (cv.width = cv.clientWidth * 2 || 320);
     const H = (cv.height = cv.clientHeight * 2 || 240);
     g.clearRect(0, 0, W, H);
+    this.paint(g, W, H, lms);
+  }
+
+  /** Public compositor hook — paints skeleton + pinch FX onto any context (live stream). */
+  drawOverlay(g: CanvasRenderingContext2D, W: number, H: number) {
+    this.paint(g, W, H, this.lastLms);
+  }
+
+  private paint(
+    g: CanvasRenderingContext2D,
+    W: number,
+    H: number,
+    lms: { x: number; y: number }[] | null
+  ) {
     if (!lms) return;
 
     const px = (p: { x: number; y: number }) => [(1 - p.x) * W, p.y * H] as const;

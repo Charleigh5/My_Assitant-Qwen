@@ -19,6 +19,7 @@ interface Props {
   speaking: boolean;
   interim: string | null;
   onRevealed: (id: string) => void;
+  voiceChip?: string | null;
 }
 
 function AgentText({ msg, onDone }: { msg: ChatMessage; onDone: (id: string) => void }) {
@@ -95,6 +96,7 @@ export default function ChatPanel({
   speaking,
   interim,
   onRevealed,
+  voiceChip,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -127,6 +129,19 @@ export default function ChatPanel({
           </div>
         </div>
         <div className="flex items-center gap-1.5">
+          {voiceChip && (
+            <span
+              className="border px-1.5 py-0.5 font-mono text-[7.5px] tracking-[0.14em] transition-colors duration-500"
+              style={{
+                borderColor: voiceChip.startsWith("EDGE") ? "#9be15d77" : "#213843",
+                color: voiceChip.startsWith("EDGE") ? "#9be15d" : "#8cacac",
+                background: voiceChip.startsWith("EDGE") ? "rgba(155,225,93,0.06)" : "transparent",
+              }}
+              title="Speech synthesis engine"
+            >
+              {voiceChip}
+            </span>
+          )}
           {speaking && (
             <div className="eq-live mr-1 flex h-4 items-end gap-[2px]">
               {[0, 1, 2, 3].map((i) => (

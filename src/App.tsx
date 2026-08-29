@@ -31,6 +31,9 @@ import { micSupported, speak, startListening, stopSpeaking } from "./lib/voice";
 import type { RecognitionHandle, TtsEngine } from "./lib/voice";
 import { voiceLabelFor } from "./lib/voice";
 import LiveStream from "./components/LiveStream";
+import ReconPanel from "./components/ReconBoard";
+import { createBoard, exportSheet, sectionPrompt } from "./lib/reconBoard";
+import type { Board, SectionKey } from "./lib/reconBoard";
 import { FORGE_COLORS } from "./lib/sceneTypes";
 import type { PinnedImage, SceneObject, ShapeKind } from "./lib/sceneTypes";
 
@@ -124,10 +127,15 @@ export default function App() {
   const [input, setInput] = useState("");
   const [tab, setTab] = useState<DockTab>(() => {
     const s = store.get("orbit.tab");
-    return s === "gallery" || s === "forge" ? (s as DockTab) : "studio";
+    return s === "gallery" || s === "forge" || s === "recon" ? (s as DockTab) : "studio";
   });
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [imagesBusy, setImagesBusy] = useState<string | null>(null);
+  const [board, setBoard] = useState<Board | null>(null);
+  const boardRef = useRef<Board | null>(null);
+  useEffect(() => {
+    boardRef.current = board;
+  }, [board]);
   const [objects, setObjects] = useState<SceneObject[]>([]);
   const [pinned, setPinned] = useState<PinnedImage[]>([]);
   const [log, setLog] = useState<LogEntry[]>([]);
@@ -345,6 +353,93 @@ export default function App() {
     [addLog]
   );
 
+  /* ---------- recon board orchestration ---------- */
+
+  const startRecon = useCallback(
+    (object: string) => {
+      const pid = personaIdRef.current;
+      const b = createBoard(object);
+      setBoard(b);
+      setTab("recon");
+      addLog(`recon: drafting sheet for “${object}”`);
+      const imageKeys = b.sections.filter((s) => s.image).map((s) => s.key);
+      const jobs = imageKeys.map(
+        (k, i) =>
+          new Promise<void>((resolve) => {
+            window.setTimeout(() => {
+              setBoard((prev) =>
+                prev && prev.id === b.id
+                  ? { ...prev, sections: prev.sections.map((s) => (s.key === k ? { ...s, status: "rendering" as const } : s)) }
+                  : prev,
+              );
+              void generateImage(sectionPrompt(b.object, k, b.seed)).then((gen) => {
+                setBoard((prev) =>
+                  prev && prev.id === b.id
+                    ? {
+                        ...prev,
+                        sections: prev.sections.map((s) =>
+                          s.key === k
+                            ? { ...s, status: (gen.method === "ai" ? "done" : "fallback") as "done" | "fallback", src: gen.src, method: gen.method }
+                            : s,
+                        ),
+                      }
+                    : prev,
+                );
+                resolve();
+              });
+            }, 500 + i * 900);
+          }),
+      );
+      void Promise.all(jobs).then(() => {
+        addLog(`recon: sheet REV A complete · ${imageKeys.length} views`);
+        reply(extraLine(pid, "reconDone", { object }));
+      });
+    },
+    [addLog, reply]
+  );
+
+  const regenSection = useCallback((key: SectionKey) => {
+    const b = boardRef.current;
+    if (!b) return;
+    const newSeed = Math.floor(Math.random() * 1_000_000_000);
+    setBoard((prev) =>
+      prev
+        ? { ...prev, sections: prev.sections.map((s) => (s.key === key ? { ...s, status: "rendering" as const, seed: newSeed } : s)) }
+        : prev,
+    );
+    void generateImage(sectionPrompt(b.object, key, newSeed)).then((gen) => {
+      setBoard((prev) =>
+        prev
+          ? {
+              ...prev,
+              sections: prev.sections.map((s) =>
+                s.key === key
+                  ? { ...s, status: (gen.method === "ai" ? "done" : "fallback") as "done" | "fallback", src: gen.src, method: gen.method }
+                  : s,
+              ),
+            }
+          : prev,
+      );
+    });
+  }, []);
+
+  const downloadSheet = useCallback(() => {
+    const b = boardRef.current;
+    if (!b) return;
+    addLog("recon: exporting composite sheet…");
+    void exportSheet(b).then((url) => {
+      if (!url) {
+        addLog("recon: export blocked by CORS — use per-view SAVE");
+        return;
+      }
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `recon-${b.object.toLowerCase().replace(/\s+/g, "-")}-rev${b.rev}.png`;
+      a.click();
+      addLog("recon: sheet downloaded");
+    });
+  }, [addLog]);
+
   const route = useCallback(
     (text: string) => {
       const intent = detectIntent(text);
@@ -401,6 +496,12 @@ export default function App() {
           const t = playNew(cur.genre, cur.seed, bpm);
           reply(fill(pick(intent === "faster" ? p.voice.faster : p.voice.slower), { bpm: t.bpm }));
           addLog(`tempo → ${t.bpm} BPM`);
+          return;
+        }
+        case "recon": {
+          const object = det.reconObject ?? "mystery artifact";
+          reply(extraLine(pid, "reconStart", { object }));
+          startRecon(object);
           return;
         }
         case "image": {
@@ -591,6 +692,7 @@ export default function App() {
     return [
       "make a lofi beat",
       "draw a neon fox",
+      "reconstruct a leather aviator jacket",
       "spawn a teal torus",
       "hands on",
       "listen",
@@ -809,6 +911,24 @@ export default function App() {
               </button>
             }
           />
+
+          <ModuleRow
+            title="RECON BOARDS"
+            sub={
+              board
+                ? `“${board.object.toUpperCase()}” · REV ${board.rev} · ${board.sections.filter((s) => s.status === "done" || s.status === "fallback").length}/5 VIEWS`
+                : "3D RECONSTRUCTION REFERENCE SHEETS"
+            }
+            right={
+              <button
+                onClick={() => setTab("recon")}
+                className="border px-2 py-1 font-mono text-[8px] tracking-[0.16em] transition-all hover:-translate-y-px"
+                style={{ borderColor: `${persona.accent}66`, color: persona.accent, background: alpha(persona.accent, 0.08) }}
+              >
+                BOARD →
+              </button>
+            }
+          />
         </div>
 
         {/* event log */}
@@ -904,12 +1024,17 @@ export default function App() {
         </div>
 
         {/* dock */}
-        <div className="flex h-[258px] shrink-0 flex-col border-t border-ink-700/60 bg-ink-900/75 backdrop-blur-md">
+        <div
+          className={`flex shrink-0 flex-col border-t border-ink-700/60 bg-ink-900/75 backdrop-blur-md transition-[height] duration-500 ${
+            tab === "recon" ? "h-[420px]" : "h-[258px]"
+          }`}
+        >
           <DockBar
             tab={tab}
             setTab={setTab}
             imageCount={images.length}
             objectCount={objects.length}
+            reconCount={board ? board.sections.filter((s) => s.status === "done" || s.status === "fallback").length : undefined}
             accent={persona.accent}
           />
           <div className="min-h-0 flex-1">
@@ -946,6 +1071,15 @@ export default function App() {
                   addLog("forge field cleared");
                 }}
                 accent={persona.accent}
+              />
+            )}
+            {tab === "recon" && (
+              <ReconPanel
+                board={board}
+                accent={persona.accent}
+                onNew={startRecon}
+                onRegenSection={regenSection}
+                onDownloadSheet={downloadSheet}
               />
             )}
           </div>

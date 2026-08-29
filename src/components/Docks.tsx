@@ -3,7 +3,7 @@ import type { GeneratedImage } from "../lib/imageGen";
 import type { SceneObject, ShapeKind } from "../lib/sceneTypes";
 import { FORGE_COLORS, SHAPE_KINDS } from "../lib/sceneTypes";
 
-export type DockTab = "studio" | "gallery" | "forge";
+export type DockTab = "studio" | "gallery" | "forge" | "recon";
 
 /* ---------- tab bar ---------- */
 
@@ -12,18 +12,21 @@ export function DockBar({
   setTab,
   imageCount,
   objectCount,
+  reconCount,
   accent,
 }: {
   tab: DockTab;
   setTab: (t: DockTab) => void;
   imageCount: number;
   objectCount: number;
+  reconCount?: number;
   accent: string;
 }) {
   const tabs: { id: DockTab; label: string; count?: number }[] = [
     { id: "studio", label: "WAVEFORGE" },
     { id: "gallery", label: "GALLERY", count: imageCount },
     { id: "forge", label: "OBJECT FORGE", count: objectCount },
+    { id: "recon", label: "RECON", count: reconCount },
   ];
   return (
     <div className="flex items-end gap-1 border-b border-ink-700/70 bg-ink-900/80 px-2 pt-1.5">

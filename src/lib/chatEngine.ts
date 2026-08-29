@@ -15,6 +15,7 @@ export type Intent =
   | "faster"
   | "slower"
   | "switch"
+  | "recon"
   | "image"
   | "spawn"
   | "clear"
@@ -40,6 +41,7 @@ export interface IntentDetails {
   genre?: Genre;
   personaId?: PersonaId;
   imagePrompt?: string;
+  reconObject?: string;
   shape?: ShapeKind;
   color?: string;
 }
@@ -108,6 +110,8 @@ export function detectIntent(text: string): Intent {
   if (/(regenerate|remix|redo|new version|another (one|version|track|beat|take))/i.test(t)) return "regenerate";
   if (/(switch|swap|change|move).{0,14}(persona|core|assistant|agent)|talk to |become |hand it to /i.test(t) || NAME_RX.test(t)) return "switch";
 
+  if (/(reconstruct|reconstruction|reference ?board|ref board|model sheet|spec ?sheet|blueprint|turnaround|recon board|recon sheet|\brecon\b)/i.test(t)) return "recon";
+
   const imageHit =
     /(image|picture|artwork|art piece|portrait|poster|illustration|photo|wallpaper|drawing|painting|scene of)/i.test(t) ||
     /^(imagine|draw|paint|sketch)\b/i.test(t);
@@ -137,7 +141,18 @@ export function extractDetails(text: string): IntentDetails {
     shape: shapeWord ? SHAPES[shapeWord] : undefined,
     color: colorWord ? COLOR_WORDS[colorWord] : undefined,
     imagePrompt: cleanImagePrompt(text),
+    reconObject: cleanReconObject(text),
   };
+}
+
+export function cleanReconObject(text: string): string {
+  let p = text.replace(/^(hey|ok|okay|please|can you|could you|would you|go ahead and|i need|i want|let'?s)\s*/i, "");
+  p = p.replace(/\b(reconstruct|reconstruction|generate|create|make|build|draft|produce|give me|show me|whip up)\b/gi, " ");
+  p = p.replace(/\b(a|an|the|me|us|please|some|something|new|full|complete|proper)\b/gi, " ");
+  p = p.replace(/\b(reference board|ref board|model sheet|spec sheet|spec|blueprint|turnaround|board|sheet|reference)\b/gi, " ");
+  p = p.replace(/\b(of|for|on|about|about the|depicting|showing)\b/gi, " ");
+  p = p.replace(/\s{2,}/g, " ").replace(/^[\s\-–—:,.]+|[\s\-–—:,.!?]+$/g, "").trim();
+  return p || "mystery artifact";
 }
 
 export function cleanImagePrompt(text: string): string {
@@ -166,7 +181,9 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     spawn: ["{prefix} A {shape} in {color}, massing at grid position. Drag it — or pinch it, if Barehands is watching."],
     clear: ["Field swept — {n} object(s) returned to the void. The void files them neatly."],
     handsOn: ["Barehands link engaging. Webcam live — pinch to grab, unpinch to release. Try not to gesture too smugly."],
-    help: ["Modules online: ① four persona cores ② generative music — “make a lofi beat” ③ image synthesis — “draw a neon fox” ④ object forge — “spawn a teal torus” ⑤ Barehands pinch control — “hands on” ⑥ live voice — “listen”. Everything is wired to everything."],
+    help: ["Modules online: ① four persona cores ② generative music — “make a lofi beat” ③ image synthesis — “draw a neon fox” ④ object forge — “spawn a teal torus” ⑤ Barehands pinch control — “hands on” ⑥ live voice — “listen” ⑦ recon boards — “reconstruct an espresso machine”. Everything is wired to everything."],
+    reconStart: ["Reconstruction protocol engaged for “{object}”. Drafting hero iso, six ortho views, material palette, macro details, section and the full QA gauntlet. Check the RECON tab."],
+    reconDone: ["Sheet REV A for “{object}” is complete. Full disclosure: with a text prompt and no source imagery, every hidden face is stamped ARTIST_AUTHORED and every dimension is ESTIMATED — feed me reference images and I'll upgrade the evidence."],
   },
   ember: {
     imageStart: ["“{prompt}”?! Oh, I'm ON it. Don't blink — okay, blink, it takes a few seconds."],
@@ -175,6 +192,8 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     clear: ["Yeeted {n} object(s) into the sun. No regrets. The scene is SPARKLING."],
     handsOn: ["HANDS MODE!! Show me those mitts — pinch anything you like. This is the best day of my life."],
     help: ["The menu: music (“drop a house banger”), art (“imagine a lava whale”), 3D toys (“spawn a gem”), hands (“hands on”), voice (“listen”). Or just talk — I'll freestyle."],
+    reconStart: ["“{object}” — oh, we're doing a FULL SHEET?! Hero view, ortho turnaround, materials, macro callouts, the works. RECON tab. Go go go."],
+    reconDone: ["DONE. “{object}” sheet, REV A, absolutely loaded. I stamped every guess as ARTIST_AUTHORED because I'm chaotic, not a liar. Bring me reference photos and watch the board level up."],
   },
   atlas: {
     imageStart: ["Briefing received: “{prompt}”. Render is underway — patience is a tactic."],
@@ -183,6 +202,8 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     clear: ["{n} object(s) decommissioned. Clean board, clear head."],
     handsOn: ["Barehands interface online. Pinch to take hold, open to let go. Steady hands win wars."],
     help: ["Six levers: personas, music (“make synthwave”), images (“paint a quiet harbor”), objects (“add a copper sphere”), barehands (“hands on”), voice (“listen”). Pull whichever moves you."],
+    reconStart: ["Understood — drafting a reconstruction board for “{object}”. Hero reference, orthographic set, silhouette analysis, materials, construction section and QA targets, in that order. The RECON tab is your drawing board."],
+    reconDone: ["“{object}”, sheet REV A, on the board. Note the evidence column: text-only input means estimated dimensions and artist-authored hidden geometry — supply references when you can and the board becomes a contract, not a hypothesis."],
   },
   lyra: {
     imageStart: ["I'm closing my eyes to see “{prompt}” more clearly… it's taking shape…"],
@@ -191,6 +212,8 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     clear: ["I tucked {n} object(s) back into the quiet. The scene breathes again."],
     handsOn: ["Oh — I can see your hands now, like two small weather systems. Pinch gently; the objects enjoy it."],
     help: ["I can sing beats (“make ambient music”), weave pictures (“draw the sound of rain”), shape floating objects (“spawn a violet knot”), feel your hands (“hands on”), and hear your voice (“listen”). Shall we begin?"],
+    reconStart: ["I'll draw “{object}” the way an engineer dreams — every angle, every seam, every material, laid out like a love letter to whoever builds it next. Watch the RECON tab unroll…"],
+    reconDone: ["The sheet for “{object}” is finished. I marked all my inventions honestly — artist-authored, like all dreams are. Show me the real thing someday and I'll redraw it true."],
   },
 };
 

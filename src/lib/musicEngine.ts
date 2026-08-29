@@ -72,7 +72,7 @@ const PENT: Record<string, number[]> = {
   major: [0, 2, 4, 7, 9],
 };
 
-const PROGS: Record<Genre, number[][]> = {
+export const PROGS: Record<Genre, number[][]> = {
   lofi: [
     [0, 5, 3, 4],
     [0, 3, 5, 4],
@@ -95,14 +95,21 @@ const PROGS: Record<Genre, number[][]> = {
   ],
 };
 
-const BPM_RANGE: Record<Genre, [number, number]> = {
+export const BPM_RANGE: Record<Genre, [number, number]> = {
   lofi: [74, 88],
   synthwave: [98, 114],
   house: [120, 127],
   ambient: [60, 70],
 };
 
-const TITLES: Record<Genre, string[]> = {
+export const SWING: Record<Genre, number> = {
+  lofi: 0.13,
+  synthwave: 0,
+  house: 0.04,
+  ambient: 0,
+};
+
+export const TITLES: Record<Genre, string[]> = {
   lofi: ["Rainy Terminal", "Midnight Commit", "Paper Planets", "Static Bloom", "Slow Deployment", "Dusty Router", "Tea at the Stack"],
   synthwave: ["Neon Interstate", "Chrome Sunset", "Laser Meridian", "Grid Runner", "Turbo Mirage", "Night Circuit", "Analog Hearts"],
   house: ["Warehouse Sun", "Pulse Doctrine", "Mirrorball Logic", "Deep End Dispatch", "Strobe Garden", "Four on the Floor", "Velvet Payload"],
@@ -134,7 +141,7 @@ export function generateTrack(opts: GenOptions): Track {
   const pent = PENT[scaleName];
   const [lo, hi] = BPM_RANGE[genre];
   const bpm = opts.bpm ?? lo + Math.floor(rnd() * (hi - lo + 1));
-  const swing = genre === "lofi" ? 0.13 : genre === "house" ? 0.04 : 0;
+  const swing = SWING[genre];
   const progPool = PROGS[genre];
   const prog = progPool[Math.floor(rnd() * progPool.length)];
   const chords = prog.map((d) => buildChord(root.m, scale, d, genre === "lofi", genre === "ambient"));

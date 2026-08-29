@@ -6,6 +6,7 @@ import type { MutableRefObject, ReactNode } from "react";
 import type { Mood, Persona } from "../lib/personas";
 import { alpha } from "../lib/personas";
 import { engine } from "../lib/musicEngine";
+import { kernelNum } from "../lib/kernel";
 import type { HandFrame } from "../lib/hands";
 import type { PinnedImage, SceneObject, ShapeKind } from "../lib/sceneTypes";
 
@@ -85,14 +86,14 @@ function Avatar({ persona, mood, beatRef }: { persona: Persona; mood: Mood; beat
     const rawPulse = Math.max(0, 1 - since / 300) * (beatRef.current.accent ? 1 : 0.6);
     const level = engine.getLevel();
 
-    const spin = mood === "thinking" ? 2.4 : mood === "djing" ? 1.25 : 0.45;
+    const spin = mood === "thinking" ? 2.4 : mood === "djing" ? 1.25 : kernelNum("avatar.idleSpin");
     group.current.rotation.y += dt * spin;
     group.current.rotation.x = THREE.MathUtils.damp(group.current.rotation.x, -state.pointer.y * 0.22, 4, dt);
 
     const morph = Math.min(1, (performance.now() - bornAt.current) / 650);
     const morphScale = easeOutBack(morph);
 
-    const breathe = Math.sin(t * 1.7) * 0.03;
+    const breathe = Math.sin(t * 1.7) * kernelNum("avatar.breathe");
     const talk = mood === "talking" ? Math.abs(Math.sin(t * 9.5)) * 0.055 : 0;
     const musicPump = mood === "djing" ? level * 0.42 + rawPulse * 0.14 : level * 0.22;
     const targetScale = (1 + breathe + talk + musicPump) * morphScale;
@@ -213,7 +214,7 @@ function Avatar({ persona, mood, beatRef }: { persona: Persona; mood: Mood; beat
       </group>
 
       <Sparkles
-        count={85}
+        count={Math.round(kernelNum("avatar.sparkles"))}
         scale={[8, 5, 8]}
         size={2.1}
         speed={mood === "thinking" ? 1.3 : 0.35}

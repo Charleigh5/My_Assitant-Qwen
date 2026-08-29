@@ -7,6 +7,8 @@ import ChatPanel from "./components/ChatPanel";
 import HandOverlay from "./components/HandOverlay";
 import { DockBar, GalleryPanel, ObjectForge } from "./components/Docks";
 import type { DockTab } from "./components/Docks";
+import KernelPanel from "./components/KernelPanel";
+import { kernel, kernelNum, planFromText, fmtVal } from "./lib/kernel";
 import { PERSONAS, getPersona, alpha } from "./lib/personas";
 import type { Mood, PersonaId } from "./lib/personas";
 import { engine, generateTrack, GENRE_LABEL } from "./lib/musicEngine";
@@ -259,6 +261,7 @@ const store = {
 };
 
 export const FIELD_CAP = 36;
+const maxObjects = () => kernelNum("scene.maxObjects");
 
 export default function App() {
   /* ---------- state ---------- */
@@ -312,6 +315,8 @@ export default function App() {
   const [voiceOut, setVoiceOut] = useState(() => store.get("orbit.voice") === "1");
   const [ttsEngine, setTtsEngine] = useState<{ engine: TtsEngine; label: string } | null>(null);
   const [liveOpen, setLiveOpen] = useState(false);
+  const [kernelRev, setKernelRev] = useState(0);
+  useEffect(() => kernel.onChange(() => setKernelRev((r) => r + 1)), []);
   const [speaking, setSpeaking] = useState(false);
 
   /* ---------- refs ---------- */
@@ -826,8 +831,8 @@ export default function App() {
           return;
         }
         case "spawn": {
-          if (objectsRef.current.length >= FIELD_CAP) {
-            reply(`The field is saturated — ${FIELD_CAP} objects is my ergonomic limit. Say "clear" and I'll sweep the deck.`);
+          if (objectsRef.current.length >= maxObjects()) {
+            reply(`The field is saturated — ${maxObjects()} objects is my ergonomic limit. Say "clear", or "allow more objects" and I'll patch my own capacity.`);
             addLog("field at capacity");
             return;
           }
@@ -870,6 +875,47 @@ export default function App() {
           setSpeaking(false);
           reply(extraLine(pid, "voiceOff"));
           return;
+        case "kernel": {
+          const plan = planFromText(text);
+          if (plan) {
+            try {
+              const entry = kernel.apply("agent", plan.note, plan.plans);
+              const summary = entry.ops.map((o) => `${o.path} → ${fmtVal(o.after)}`).slice(0, 2).join(", ");
+              reply(extraLine(pid, "kernelApplied", { n: entry.ops.length, summary, id: entry.id }));
+              addLog(`kernel: ${entry.ops.length} op(s) · ${plan.note}`);
+              setTab("kernel");
+            } catch (e) {
+              reply(extraLine(pid, "kernelNone"));
+              addLog(`kernel rejected: ${(e as Error).message}`);
+            }
+          } else if (/(open|show|ls|list)/i.test(text)) {
+            setTab("kernel");
+            reply(extraLine(pid, "kernelOpen", { n: kernel.list().length, j: kernel.count() }));
+            addLog("kernel console opened");
+          } else {
+            reply(extraLine(pid, "kernelNone"));
+            addLog("kernel: no plan found");
+          }
+          return;
+        }
+        case "rollback": {
+          const undone = kernel.undoLast();
+          if (undone) {
+            reply(extraLine(pid, "rollback", { id: undone.id, note: undone.note }));
+            addLog(`kernel: rollback #${undone.id}`);
+          } else {
+            reply("The journal is empty — there's nothing to roll back. I'm factory-fresh.");
+            addLog("kernel: rollback requested, journal empty");
+          }
+          return;
+        }
+        case "kernel_reset": {
+          kernel.reset();
+          reply(extraLine(pid, "kernelReset"));
+          addLog("kernel: factory reset");
+          setTab("kernel");
+          return;
+        }
         case "who":
           reply(simpleLine(pid, "who"));
           return;
@@ -1066,6 +1112,8 @@ export default function App() {
       "gate a leather aviator jacket",
       "spawn a teal torus",
       "hands on",
+      "optimize house tempo",
+      "open the kernel",
       `switch to ${other.name.toLowerCase()}`,
     ];
   }, [personaId]);
@@ -1336,6 +1384,24 @@ export default function App() {
           />
 
           <ModuleRow
+            title="KERNEL"
+            sub={
+              kernel.count()
+                ? `${kernel.count()} LIVE PATCH${kernel.count() === 1 ? "" : "ES"} · JOURNALED`
+                : "SELF-MODIFICATION · FACTORY DNA"
+            }
+            right={
+              <button
+                onClick={() => setTab("kernel")}
+                className="border px-2 py-1 font-mono text-[8px] tracking-[0.16em] transition-all hover:-translate-y-px"
+                style={{ borderColor: `${persona.accent}66`, color: persona.accent, background: alpha(persona.accent, 0.08) }}
+              >
+                CONSOLE →
+              </button>
+            }
+          />
+
+          <ModuleRow
             title="RECON BOARDS"
             sub={
               board
@@ -1520,6 +1586,16 @@ export default function App() {
             >
               {mood === "djing" ? "◉ ON THE DECKS" : mood === "thinking" ? "◍ COMPUTING" : mood === "talking" ? "◎ SPEAKING" : "○ IDLE DRIFT"}
             </span>
+            {kernelRev >= 0 && kernel.count() > 0 && (
+              <button
+                onClick={() => setTab("kernel")}
+                className="border px-2 py-1 font-mono text-[8px] tracking-[0.24em] transition-all hover:-translate-y-px"
+                style={{ borderColor: alpha(persona.accent, 0.5), color: persona.accent, background: "rgba(11,19,23,0.6)", boxShadow: `0 0 14px -6px ${persona.accent}` }}
+                title="Open the kernel self-mod console"
+              >
+                ⌬ {kernel.count()} LIVE PATCH{kernel.count() === 1 ? "" : "ES"}
+              </button>
+            )}
             {track && (
               <span className="flex items-center gap-2 border border-ink-700/70 bg-ink-950/60 px-2 py-1">
                 <span className={`flex h-3 items-end gap-[2px] ${playing ? "eq-live" : ""}`}>
@@ -1551,7 +1627,7 @@ export default function App() {
         {/* dock */}
         <div
           className={`flex shrink-0 flex-col border-t border-ink-700/60 bg-ink-900/75 backdrop-blur-md transition-[height] duration-500 ${
-            tab === "recon" ? "h-[420px]" : "h-[258px]"
+            tab === "recon" || tab === "kernel" ? "h-[420px]" : "h-[258px]"
           }`}
         >
           <DockBar
@@ -1560,6 +1636,7 @@ export default function App() {
             imageCount={images.length}
             objectCount={objects.length}
             reconCount={board ? board.sections.filter((s) => s.status === "done" || s.status === "fallback").length : undefined}
+            kernelCount={kernel.count()}
             accent={persona.accent}
           />
           <div className="min-h-0 flex-1">
@@ -1585,7 +1662,7 @@ export default function App() {
               <ObjectForge
                 objects={objects}
                 onSpawn={(shape, color) => {
-                  if (objectsRef.current.length >= FIELD_CAP) {
+                  if (objectsRef.current.length >= maxObjects()) {
                     addLog("field at capacity");
                     return;
                   }
@@ -1600,6 +1677,7 @@ export default function App() {
                 accent={persona.accent}
               />
             )}
+            {tab === "kernel" && <KernelPanel accent={persona.accent} onEvent={addLog} />}
             {tab === "recon" && (
               <div className="flex h-full min-h-0 flex-col">
                 {/* phase toggle: reference board (phase 1) → premodel gate (phase 2) */}

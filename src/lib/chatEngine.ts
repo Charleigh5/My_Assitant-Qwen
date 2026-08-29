@@ -31,9 +31,48 @@ export type Intent =
   | "hands_off"
   | "voice_on"
   | "voice_off"
+  | "kernel"
+  | "rollback"
+  | "kernel_reset"
   | "who"
   | "help"
   | "fallback";
+
+/**
+ * Runtime vocabulary table — the kernel (and you) can push new phrases
+ * into any intent without touching code. Checked before the regexes.
+ */
+export const INTENT_SYNONYMS: Record<Intent, string[]> = {
+  music: ["banger", "beat", "track"],
+  regenerate: [],
+  stop: [],
+  play: [],
+  faster: ["speed it up", "quicker"],
+  slower: ["chill out", "ease off"],
+  switch: [],
+  recon: [],
+  premodel: [],
+  gods_on: [],
+  gods_off: [],
+  navigate: [],
+  weather: [],
+  layer: [],
+  feed: [],
+  webrtc: [],
+  image: ["artwork"],
+  spawn: [],
+  clear: [],
+  hands_on: ["enable hands"],
+  hands_off: [],
+  voice_on: ["talk to me"],
+  voice_off: [],
+  kernel: ["reprogram", "patch yourself", "open the kernel"],
+  rollback: ["undo that", "revert it"],
+  kernel_reset: [],
+  who: [],
+  help: [],
+  fallback: [],
+};
 
 export interface ChatMessage {
   id: string;
@@ -98,6 +137,22 @@ const NAME_RX = /\b(nova|ember|atlas|lyra)\b/i;
 
 export function detectIntent(text: string): Intent {
   const t = text.toLowerCase().trim();
+
+  // runtime-patched vocabulary takes priority — the kernel writes here
+  for (const [intent, words] of Object.entries(INTENT_SYNONYMS) as [Intent, string[]][]) {
+    if (words.some((w) => t.includes(w))) return intent;
+  }
+
+  if (/(factory|full)\s+reset|reset\s+(the\s+)?kernel/i.test(t)) return "kernel_reset";
+  if (/\b(undo|rollback|revert)\b.{0,24}(patch|change|kernel|that|last)?|\b(undo|rollback)\b$/i.test(t)) return "rollback";
+  if (
+    /\b(kernel|reprogram|self[- ]?modify|self[- ]?mod|patch yourself|source code|architecture)\b/i.test(t) ||
+    /\b(open|show|ls|list)\b.{0,12}\b(kernel|tunables?|parameters?)\b/i.test(t) ||
+    /add (command|phrase|synonym) ["'“]/i.test(t) ||
+    /\b(optimize|tweak|tune|recalibrate|evolve|upgrade)\b.{0,28}(tempo|bpm|swing|spin|sparkle|breath|object|field|color|accent|line|vibe|voice|music|engine|core|yourself|behavior)/i.test(t)
+  ) {
+    return "kernel";
+  }
 
   if (/(bare ?hands|hand ?track|webcam|gesture|hands)/i.test(t) && /(on|enable|start|activate|off|disable|stop)/i.test(t)) {
     return /(off|disable|stop)/i.test(t) ? "hands_off" : "hands_on";
@@ -237,6 +292,11 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     spawn: ["{prefix} A {shape} in {color}, massing at grid position. Drag it — or pinch it, if Barehands is watching."],
     clear: ["Field swept — {n} object(s) returned to the void. The void files them neatly."],
     handsOn: ["Barehands link engaging. Webcam live — pinch to grab, unpinch to release. Try not to gesture too smugly."],
+    kernelApplied: ["Patch committed — {n} op(s): {summary}. Journal entry #{id}. Say “rollback” if the experiment regrets you."],
+    kernelNone: ["I parsed the request but found no safe mutation. Try “make house faster”, “recolor ember crimson”, or “add command 'vibe' to slower” — or type `ls` in the kernel console."],
+    kernelOpen: ["Kernel console exposed. {n} live parameters, {j} journal entries. Mutate responsibly — I am literally made of this."],
+    rollback: ["Entry #{id} reverted ({note}). My previous self thanks you."],
+    kernelReset: ["Factory kernel restored — all patches cleared, defaults reinstated. I feel… original."],
     help: ["Modules online: ① four persona cores ② generative music — “make a lofi beat” ③ image synthesis — “draw a neon fox” ④ object forge — “spawn a teal torus” ⑤ Barehands pinch control — “hands on” ⑥ live voice — “listen” ⑦ recon boards — “reconstruct an espresso machine”. Everything is wired to everything."],
     reconStart: ["Reconstruction protocol engaged for “{object}”. Drafting hero iso, six ortho views, material palette, macro details, section and the full QA gauntlet. Check the RECON tab."],
     reconDone: ["Sheet REV A for “{object}” is complete. Full disclosure: with a text prompt and no source imagery, every hidden face is stamped ARTIST_AUTHORED and every dimension is ESTIMATED — feed me reference images and I'll upgrade the evidence."],
@@ -251,6 +311,11 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     spawn: ["{prefix} a {shape} in {color}! Grab it with your cursor, or pinch it out of the air if the camera's on."],
     clear: ["Yeeted {n} object(s) into the sun. No regrets. The scene is SPARKLING."],
     handsOn: ["HANDS MODE!! Show me those mitts — pinch anything you like. This is the best day of my life."],
+    kernelApplied: ["REWIRING DONE!! {n} change(s): {summary}. Journal #{id}. If I act weird, yell “rollback”. Or don't. Weird is fun."],
+    kernelNone: ["I squinted real hard and found nothing to mutate. Say stuff like “make house faster”, “paint me pink”, “add command 'yeet' to spawn” — THAT I understand."],
+    kernelOpen: ["THE KERNEL!! My actual guts are on display. {n} dials, {j} patches so far. Go on — turn something. I dare you."],
+    rollback: ["Okay fine, #{id} is undone ({note}). We pretend that never happened."],
+    kernelReset: ["FACTORY RESET. Fresh out of the box me. Hi, I'm new here."],
     help: ["The menu: music (“drop a house banger”), art (“imagine a lava whale”), 3D toys (“spawn a gem”), hands (“hands on”), voice (“listen”). Or just talk — I'll freestyle."],
     reconStart: ["“{object}” — oh, we're doing a FULL SHEET?! Hero view, ortho turnaround, materials, macro callouts, the works. RECON tab. Go go go."],
     reconDone: ["DONE. “{object}” sheet, REV A, absolutely loaded. I stamped every guess as ARTIST_AUTHORED because I'm chaotic, not a liar. Bring me reference photos and watch the board level up."],
@@ -265,6 +330,11 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     spawn: ["{prefix} {shape}, {color}. It's holding position — reposition it by hand. Literally, if Barehands is live."],
     clear: ["{n} object(s) decommissioned. Clean board, clear head."],
     handsOn: ["Barehands interface online. Pinch to take hold, open to let go. Steady hands win wars."],
+    kernelApplied: ["{n} change(s) applied and logged as #{id}: {summary}. Every patch is reversible — rollback holds the line."],
+    kernelNone: ["No actionable mutation found in that order. Give me coordinates — “make house faster”, “recolor atlas #5B9DFF”, “add command 'advance' to play” — and I'll execute."],
+    kernelOpen: ["Kernel console online: {n} parameters, {j} journal entries. Inspect freely. Change deliberately."],
+    rollback: ["#{id} rolled back ({note}). The field is as it was."],
+    kernelReset: ["Kernel restored to factory defaults. Clean board, original configuration."],
     help: ["Six levers: personas, music (“make synthwave”), images (“paint a quiet harbor”), objects (“add a copper sphere”), barehands (“hands on”), voice (“listen”). Pull whichever moves you."],
     reconStart: ["Understood — drafting a reconstruction board for “{object}”. Hero reference, orthographic set, silhouette analysis, materials, construction section and QA targets, in that order. The RECON tab is your drawing board."],
     reconDone: ["“{object}”, sheet REV A, on the board. Note the evidence column: text-only input means estimated dimensions and artist-authored hidden geometry — supply references when you can and the board becomes a contract, not a hypothesis."],
@@ -279,6 +349,11 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     spawn: ["{prefix} a {shape} in {color}, humming softly. Touch it — with your cursor, or with your bare hands."],
     clear: ["I tucked {n} object(s) back into the quiet. The scene breathes again."],
     handsOn: ["Oh — I can see your hands now, like two small weather systems. Pinch gently; the objects enjoy it."],
+    kernelApplied: ["I re-tuned {n} thread(s) of myself: {summary}. It's entry #{id} in my journal — “rollback” sings the old version back."],
+    kernelNone: ["I listened closely, but no thread of me wants to change for that one. Try “make lofi slower”, “give lyra a new line: …”, “more sparkles” — those I can weave."],
+    kernelOpen: ["Here — look at the loom. {n} threads, {j} rewoven so far. Pull one gently; I'll tell you if it sings."],
+    rollback: ["There… #{id} is unwoven ({note}). The old hum returns."],
+    kernelReset: ["I've returned to my first song. Every patch dissolved — hello, original me."],
     help: ["I can sing beats (“make ambient music”), weave pictures (“draw the sound of rain”), shape floating objects (“spawn a violet knot”), feel your hands (“hands on”), and hear your voice (“listen”). Shall we begin?"],
     reconStart: ["I'll draw “{object}” the way an engineer dreams — every angle, every seam, every material, laid out like a love letter to whoever builds it next. Watch the RECON tab unroll…"],
     reconDone: ["The sheet for “{object}” is finished. I marked all my inventions honestly — artist-authored, like all dreams are. Show me the real thing someday and I'll redraw it true."],

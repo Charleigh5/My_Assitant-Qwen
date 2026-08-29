@@ -214,7 +214,7 @@ function Avatar({ persona, mood, beatRef }: { persona: Persona; mood: Mood; beat
       </group>
 
       <Sparkles
-        count={Math.round(kernelNum("avatar.sparkles"))}
+        count={Math.max(1, Math.round(kernelNum("avatar.sparkles")))}
         scale={[8, 5, 8]}
         size={2.1}
         speed={mood === "thinking" ? 1.3 : 0.35}
@@ -711,6 +711,26 @@ export default function Assistant3D({
   onPinnedMove?: (id: string, pos: [number, number, number]) => void;
   onCorePulse: () => void;
 }) {
+  const webglOk = useMemo(() => {
+    try {
+      const c = document.createElement("canvas");
+      return !!(c.getContext("webgl2") || c.getContext("webgl"));
+    } catch {
+      return false;
+    }
+  }, []);
+
+  if (!webglOk) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
+        <p className="font-mono text-[10px] tracking-[0.3em] text-ember">RENDERER OFFLINE</p>
+        <p className="max-w-sm font-mono text-[9px] leading-relaxed tracking-[0.14em] text-mist-500">
+          NO WEBGL CONTEXT AVAILABLE — THE 3D CORE NEEDS GPU ACCELERATION. ENABLE HARDWARE ACCELERATION IN BROWSER SETTINGS, THEN RELOAD.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <Canvas dpr={[1, 2]} camera={{ position: [0, 0.25, 6.6], fov: 42 }} gl={{ antialias: true, alpha: true }}>
       <ambientLight intensity={0.55} />

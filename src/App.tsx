@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import { Component, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import Assistant3D from "./components/Assistant3D";
 import type { BeatRef } from "./components/Assistant3D";
 import StudioPanel from "./components/StudioPanel";
@@ -263,7 +263,71 @@ const store = {
 export const FIELD_CAP = 36;
 const maxObjects = () => kernelNum("scene.maxObjects");
 
-export default function App() {
+/* ---------- stage boundary: a blank viewport must never be silent ---------- */
+
+class StageBoundary extends Component<{ children: ReactNode }, { error: string | null; epoch: number }> {
+  state = { error: null as string | null, epoch: 0 };
+  static getDerivedStateFromError(e: unknown) {
+    return { error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
+          <p className="font-mono text-[10px] tracking-[0.3em] text-ember">CORE VIEWPORT FAULT</p>
+          <code className="max-w-md border border-ink-600 bg-ink-950/70 px-3 py-2 font-mono text-[9px] leading-relaxed text-mist-300">
+            {this.state.error}
+          </code>
+          <p className="max-w-sm font-mono text-[8px] leading-relaxed tracking-[0.12em] text-mist-600">
+            THE RENDER SUBTREE THREW AT RUNTIME — USUALLY A GPU DRIVER HICCUP OR LOST WEBGL CONTEXT. REBOOT RE-MOUNTS THE CORE.
+          </p>
+          <button
+            onClick={() => this.setState((s) => ({ error: null, epoch: s.epoch + 1 }))}
+            className="border border-ember px-4 py-2 font-mono text-[10px] tracking-[0.22em] text-ember transition-all hover:-translate-y-px hover:bg-ember/10"
+          >
+            REBOOT CORE
+          </button>
+        </div>
+      );
+    }
+    return <Fragment key={this.state.epoch}>{this.props.children}</Fragment>;
+  }
+}
+
+/* ---------- top-level crash report ---------- */
+
+class CrashBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  state = { error: null as string | null };
+  static getDerivedStateFromError(e: unknown) {
+    return { error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex h-screen w-full items-center justify-center bg-ink-950 font-mono text-mist-100">
+          <div className="w-[min(560px,90vw)] border border-ember/60 bg-ink-900 p-6" style={{ boxShadow: "0 0 60px -20px rgba(255,122,80,0.5)" }}>
+            <p className="text-[11px] tracking-[0.3em] text-ember">ORBIT CONSOLE — KERNEL PANIC</p>
+            <code className="mt-3 block border border-ink-600 bg-ink-950/80 px-3 py-2 text-[10px] leading-relaxed text-mist-300">
+              {this.state.error}
+            </code>
+            <p className="mt-3 text-[9px] leading-relaxed tracking-[0.1em] text-mist-600">
+              AN UNCAUGHT FAULT TOOK THE CONSOLE DOWN. A RELOAD RESTORES STATE FROM THE JOURNALS (PERSONA, KERNEL PATCHES, PREFERENCES).
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-4 border border-ember px-4 py-2 text-[10px] tracking-[0.22em] text-ember transition-all hover:-translate-y-px hover:bg-ember/10"
+            >
+              RELOAD CONSOLE
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function AppInner() {
   /* ---------- state ---------- */
   const [personaId, setPersonaId] = useState<PersonaId>(() => {
     const s = store.get("orbit.persona");
@@ -299,6 +363,11 @@ export default function App() {
 
   /* ---------- god's eye observation deck ---------- */
   const [viewMode, setViewMode] = useState<"core" | "gods">("core");
+  // deck mounts lazily on first visit so it can never fault the assistant viewport at boot
+  const [deckVisited, setDeckVisited] = useState(false);
+  useEffect(() => {
+    if (viewMode === "gods") setDeckVisited(true);
+  }, [viewMode]);
   const godsApiRef = useRef<GodsEyeApi | null>(null);
   const [focusPoint, setFocusPoint] = useState<FocusPoint | null>(null);
   const focusPointRef = useRef<FocusPoint | null>(null);
@@ -614,6 +683,17 @@ export default function App() {
 
   /* ---------- god's eye navigation ---------- */
 
+  /* open the deck and run a command once its API is live (deck mounts lazily) */
+  const deckCmd = useCallback((fn: (api: GodsEyeApi) => void) => {
+    setViewMode("gods");
+    let tries = 12;
+    const attempt = () => {
+      if (godsApiRef.current) fn(godsApiRef.current);
+      else if (--tries > 0) window.setTimeout(attempt, 130);
+    };
+    window.setTimeout(attempt, 40);
+  }, []);
+
   const navTo = useCallback(
     async (target: string) => {
       setViewMode("gods");
@@ -623,10 +703,10 @@ export default function App() {
         addLog(`god's eye: could not locate “${target}”`);
         return;
       }
-      godsApiRef.current?.flyTo(place.lat, place.lon, 9, place.name);
+      deckCmd((api) => api.flyTo(place.lat, place.lon, 9, place.name));
       addLog(`god's eye: nav → ${place.name}`);
     },
-    [addLog, reply]
+    [addLog, reply, deckCmd]
   );
 
   const onWeatherReport = useCallback(
@@ -783,30 +863,28 @@ export default function App() {
           return;
         }
         case "layer": {
-          setViewMode("gods");
-          const api = godsApiRef.current;
-          if (/street/i.test(text)) api?.setBase("streets");
-          else if (/imagery|satellite/i.test(text)) api?.setBase("imagery");
-          else if (/true ?color|terra/i.test(text)) api?.setBase("truecolor");
-          else if (/fire|thermal/i.test(text)) api?.setOverlay("fires", true);
-          else if (/rail|transit/i.test(text)) api?.setOverlay("transit", true);
-          else if (/seismic|earthquake/i.test(text)) api?.setOverlay("seismic", true);
-          else if (/event/i.test(text)) api?.setOverlay("events", true);
-          else if (/sat\b|satellite/i.test(text)) api?.setBase("imagery");
+          deckCmd((api) => {
+            if (/street/i.test(text)) api.setBase("streets");
+            else if (/imagery|satellite/i.test(text)) api.setBase("imagery");
+            else if (/true ?color|terra/i.test(text)) api.setBase("truecolor");
+            else if (/fire|thermal/i.test(text)) api.setOverlay("fires", true);
+            else if (/rail|transit/i.test(text)) api.setOverlay("transit", true);
+            else if (/seismic|earthquake/i.test(text)) api.setOverlay("seismic", true);
+            else if (/event/i.test(text)) api.setOverlay("events", true);
+            else if (/sat\b|satellite/i.test(text)) api.setBase("imagery");
+          });
           reply(extraLine(pid, "layerDone"));
           addLog("god's eye: layer adjusted");
           return;
         }
         case "feed": {
-          setViewMode("gods");
-          godsApiRef.current?.setFeed("f1");
+          deckCmd((api) => api.setFeed("f1"));
           reply(extraLine(pid, "feedDone"));
           addLog("god's eye: feed monitor opened");
           return;
         }
         case "webrtc": {
-          setViewMode("gods");
-          godsApiRef.current?.engageLink();
+          deckCmd((api) => api.engageLink());
           reply(extraLine(pid, "webrtcDone"));
           return;
         }
@@ -926,7 +1004,7 @@ export default function App() {
           reply(simpleLine(pid, "fallback"));
       }
     },
-    [addLog, playNew, reply, setHands, setListen, spawnObject]
+    [addLog, deckCmd, playNew, reply, setHands, setListen, spawnObject]
   );
 
   const sendMessage = useCallback(
@@ -1519,17 +1597,19 @@ export default function App() {
               viewMode === "gods" ? "pointer-events-none opacity-0" : "opacity-100"
             }`}
           >
-            <Assistant3D
-              persona={persona}
-              mood={mood}
-              beatRef={beatRef}
-              handRef={handFrameRef}
-              objects={objects}
-              pinned={pinned}
-              onObjectMove={onObjectMove}
-              onPinnedMove={onPinnedMove}
-              onCorePulse={onCorePulse}
-            />
+            <StageBoundary>
+              <Assistant3D
+                persona={persona}
+                mood={mood}
+                beatRef={beatRef}
+                handRef={handFrameRef}
+                objects={objects}
+                pinned={pinned}
+                onObjectMove={onObjectMove}
+                onPinnedMove={onPinnedMove}
+                onCorePulse={onCorePulse}
+              />
+            </StageBoundary>
           </div>
 
           {/* file drop overlay */}
@@ -1548,6 +1628,7 @@ export default function App() {
           </div>
 
           <div className={`absolute inset-0 ${viewMode === "gods" ? "" : "pointer-events-none invisible"}`}>
+            {deckVisited && (
             <GodsEye
               active={viewMode === "gods"}
               accent={persona.accent}
@@ -1556,7 +1637,30 @@ export default function App() {
               onFocusChange={setFocusPoint}
               onLog={addLog}
             />
+            )}
           </div>
+
+          {/* return-to-core chip while on the observation deck */}
+          {viewMode === "gods" && (
+            <button
+              onClick={() => {
+                setViewMode("core");
+                addLog("god's eye: deck closed");
+              }}
+              className="absolute right-5 top-5 z-30 flex items-center gap-2 border px-3 py-2 font-mono text-[9px] tracking-[0.22em] transition-all hover:-translate-y-0.5"
+              style={{
+                borderColor: alpha(persona.accent, 0.55),
+                color: persona.accent,
+                background: "rgba(11,19,23,0.85)",
+                boxShadow: `0 0 22px -8px ${persona.accent}`,
+              }}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="m12 19-7-7 7-7M5 12h14" />
+              </svg>
+              RETURN TO CORE
+            </button>
+          )}
 
           {/* HUD corners */}
           <span className="hud-corner left-3 top-3 border-l-2 border-t-2" />
@@ -1775,5 +1879,13 @@ export default function App() {
         }}
       />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <CrashBoundary>
+      <AppInner />
+    </CrashBoundary>
   );
 }

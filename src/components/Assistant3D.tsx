@@ -117,7 +117,7 @@ function Avatar({ persona, mood, beatRef }: { persona: Persona; mood: Mood; beat
       dt
     );
     wireMat.current.color.lerp(target, k);
-    wireMat.current.opacity = 0.16 + rawPulse * 0.3 + level * 0.2;
+    wireMat.current.opacity = 0.3 + rawPulse * 0.3 + level * 0.2;
     ringMatA.current.color.lerp(target, k);
     ringMatB.current.color.lerp(target, k);
     ringMatA.current.opacity = 0.3 + rawPulse * 0.55 + level * 0.3;
@@ -148,12 +148,13 @@ function Avatar({ persona, mood, beatRef }: { persona: Persona; mood: Mood; beat
 
   return (
     <>
-      <pointLight ref={keyLight} color={persona.accent} intensity={2.6} position={[-3.5, -1.6, 3.2]} distance={13} />
+      <pointLight ref={keyLight} color={persona.accent} intensity={3.4} position={[-3.5, -1.6, 3.2]} distance={13} />
       <group ref={group}>
         <Float speed={2.2} rotationIntensity={0.35} floatIntensity={0.7}>
           <group ref={coreGroup}>
             <sprite ref={glow} scale={3.1}>
-              <spriteMaterial ref={glowMat} map={glowTex} color={persona.accent} transparent opacity={0.5} depthWrite={false} blending={THREE.AdditiveBlending} />
+              {/* NormalBlending: additive sprites vanish against an alpha-transparent canvas */}
+              <spriteMaterial ref={glowMat} map={glowTex} color={persona.accent} transparent opacity={0.62} depthWrite={false} blending={THREE.NormalBlending} />
             </sprite>
 
             {isBlob ? (
@@ -162,7 +163,7 @@ function Avatar({ persona, mood, beatRef }: { persona: Persona; mood: Mood; beat
                 <MeshDistortMaterial
                   color={alpha(persona.accent, 0.25)}
                   emissive={persona.accent}
-                  emissiveIntensity={0.6}
+                  emissiveIntensity={0.95}
                   roughness={0.25}
                   metalness={0.35}
                   distort={0.38}
@@ -174,7 +175,7 @@ function Avatar({ persona, mood, beatRef }: { persona: Persona; mood: Mood; beat
                 {persona.shape === "icosa" && <icosahedronGeometry args={[1.08, 0]} />}
                 {persona.shape === "knot" && <torusKnotGeometry args={[0.68, 0.24, 150, 22, 2, 3]} />}
                 {persona.shape === "dodeca" && <dodecahedronGeometry args={[1.08, 0]} />}
-                <meshStandardMaterial ref={coreMat} color={alpha(persona.accent, 0.25)} emissive={persona.accent} emissiveIntensity={0.6} roughness={0.3} metalness={0.4} flatShading />
+                <meshStandardMaterial ref={coreMat} color={alpha(persona.accent, 0.25)} emissive={persona.accent} emissiveIntensity={0.95} roughness={0.3} metalness={0.4} flatShading />
               </mesh>
             )}
 
@@ -188,7 +189,7 @@ function Avatar({ persona, mood, beatRef }: { persona: Persona; mood: Mood; beat
                 {persona.shape === "icosa" && <icosahedronGeometry args={[1.08, 1]} />}
                 {persona.shape === "knot" && <torusKnotGeometry args={[0.68, 0.24, 90, 12, 2, 3]} />}
                 {persona.shape === "dodeca" && <dodecahedronGeometry args={[1.08, 0]} />}
-                <meshBasicMaterial ref={wireMat} color={persona.accent} wireframe transparent opacity={0.2} />
+                <meshBasicMaterial ref={wireMat} color={persona.accent} wireframe transparent opacity={0.3} />
               </mesh>
             )}
           </group>
@@ -434,6 +435,7 @@ function Scene({
   onObjectMove,
   onPinnedMove,
   onCorePulse,
+  onReady,
 }: {
   persona: Persona;
   mood: Mood;
@@ -444,7 +446,9 @@ function Scene({
   onObjectMove: (id: string, pos: [number, number, number]) => void;
   onPinnedMove?: (id: string, pos: [number, number, number]) => void;
   onCorePulse: () => void;
+  onReady?: () => void;
 }) {
+  const readySent = useRef(false);
   const { camera, gl } = useThree();
   const controls = useRef<any>(null);
   const cursorRef = useRef<THREE.Group>(null);
@@ -546,6 +550,10 @@ function Scene({
 
   /* ---- per-frame: hand cursor, hand grab, object animation ---- */
   useFrame((state, dt) => {
+    if (!readySent.current) {
+      readySent.current = true;
+      onReady?.();
+    }
     const t = state.clock.elapsedTime;
     const hand = handRef.current;
     const sinceBeat = performance.now() - beatRef.current.at;
@@ -700,6 +708,7 @@ export default function Assistant3D({
   onObjectMove,
   onPinnedMove,
   onCorePulse,
+  onReady,
 }: {
   persona: Persona;
   mood: Mood;
@@ -710,6 +719,7 @@ export default function Assistant3D({
   onObjectMove: (id: string, pos: [number, number, number]) => void;
   onPinnedMove?: (id: string, pos: [number, number, number]) => void;
   onCorePulse: () => void;
+  onReady?: () => void;
 }) {
   const webglOk = useMemo(() => {
     try {
@@ -746,6 +756,7 @@ export default function Assistant3D({
         onObjectMove={onObjectMove}
         onPinnedMove={onPinnedMove}
         onCorePulse={onCorePulse}
+        onReady={onReady}
       />
     </Canvas>
   );

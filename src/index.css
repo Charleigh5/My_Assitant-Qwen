@@ -163,6 +163,16 @@ input[type="range"]::-moz-range-thumb {
 }
 .pulse-dot { animation: pulse-dot 1.8s ease-out infinite; }
 
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.img-shimmer {
+  background: linear-gradient(100deg, #13222a 40%, #1e3641 50%, #13222a 60%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
 @keyframes rise-in {
   from { opacity: 0; transform: translateY(14px); }
   to { opacity: 1; transform: translateY(0); }

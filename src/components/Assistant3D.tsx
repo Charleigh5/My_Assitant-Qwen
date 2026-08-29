@@ -1,10 +1,13 @@
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree, useLoader } from "@react-three/fiber";
 import { Float, MeshDistortMaterial, OrbitControls, Sparkles } from "@react-three/drei";
 import * as THREE from "three";
-import { useEffect, useMemo, useRef } from "react";
+import { Component, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import type { MutableRefObject, ReactNode } from "react";
 import type { Mood, Persona } from "../lib/personas";
 import { alpha } from "../lib/personas";
 import { engine } from "../lib/musicEngine";
+import type { HandFrame } from "../lib/hands";
+import type { PinnedImage, SceneObject, ShapeKind } from "../lib/sceneTypes";
 
 export interface BeatRef {
   current: { at: number; accent: boolean };
@@ -16,11 +19,15 @@ const easeOutBack = (x: number) => {
   return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
 };
 
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
 interface Shard {
   base: [number, number, number];
   scale: number;
   speed: number;
 }
+
+/* ================= avatar core ================= */
 
 function Avatar({ persona, mood, beatRef }: { persona: Persona; mood: Mood; beatRef: BeatRef }) {
   const group = useRef<THREE.Group>(null!);
@@ -46,7 +53,7 @@ function Avatar({ persona, mood, beatRef }: { persona: Persona; mood: Mood; beat
       const angle = (i / 11) * Math.PI * 2;
       const r = 1.85 + (i % 3) * 0.32;
       arr.push({
-        base: [Math.cos(angle) * r, (Math.sin(i * 2.7) * 0.7), Math.sin(angle) * r],
+        base: [Math.cos(angle) * r, Math.sin(i * 2.7) * 0.7, Math.sin(angle) * r],
         scale: 0.055 + (i % 4) * 0.028,
         speed: 0.8 + (i % 5) * 0.35,
       });
@@ -99,7 +106,6 @@ function Avatar({ persona, mood, beatRef }: { persona: Persona; mood: Mood; beat
       group.current.rotation.z = THREE.MathUtils.damp(group.current.rotation.z, 0, 5, dt);
     }
 
-    // color drift toward persona accent
     const k = 1 - Math.pow(0.0015, dt);
     coreMat.current.color.lerp(targetDark, k);
     coreMat.current.emissive.lerp(target, k);
@@ -218,30 +224,426 @@ function Avatar({ persona, mood, beatRef }: { persona: Persona; mood: Mood; beat
   );
 }
 
-export default function Assistant3D({
+/* ================= forged objects ================= */
+
+function ShapeGeometry({ shape }: { shape: ShapeKind }) {
+  switch (shape) {
+    case "cube":
+      return <boxGeometry args={[1, 1, 1]} />;
+    case "sphere":
+      return <sphereGeometry args={[0.62, 32, 24]} />;
+    case "torus":
+      return <torusGeometry args={[0.5, 0.22, 20, 44]} />;
+    case "cone":
+      return <coneGeometry args={[0.55, 1.1, 24]} />;
+    case "cylinder":
+      return <cylinderGeometry args={[0.4, 0.4, 1.1, 24]} />;
+    case "gem":
+      return <octahedronGeometry args={[0.66, 0]} />;
+    case "knot":
+      return <torusKnotGeometry args={[0.42, 0.15, 100, 14]} />;
+  }
+}
+
+function ForgeObject({
+  obj,
+  register,
+  onDown,
+}: {
+  obj: SceneObject;
+  register: (id: string, g: THREE.Group | null) => void;
+  onDown: (e: any, id: string) => void;
+}) {
+  const ref = useRef<THREE.Group>(null);
+  useEffect(() => {
+    register(obj.id, ref.current);
+    return () => register(obj.id, null);
+  }, [obj.id, register]);
+
+  return (
+    <group ref={ref} position={obj.position} scale={obj.scale}>
+      <mesh
+        onPointerDown={(e) => onDown(e, obj.id)}
+        onPointerOver={(e) => {
+          e.stopPropagation();
+          document.body.style.cursor = "grab";
+        }}
+        onPointerOut={() => {
+          document.body.style.cursor = "";
+        }}
+      >
+        <ShapeGeometry shape={obj.shape} />
+        <meshStandardMaterial
+          color={obj.color}
+          emissive={obj.color}
+          emissiveIntensity={0.16}
+          metalness={0.38}
+          roughness={0.26}
+          flatShading={obj.shape === "gem" || obj.shape === "cube"}
+        />
+      </mesh>
+      <mesh scale={1.07}>
+        <ShapeGeometry shape={obj.shape} />
+        <meshBasicMaterial color={obj.color} wireframe transparent opacity={0.13} />
+      </mesh>
+    </group>
+  );
+}
+
+/* ================= pinned image holograms ================= */
+
+class TexBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
+function PinnedImagePlane({ pin, accent }: { pin: PinnedImage; accent: string }) {
+  const tex = useLoader(THREE.TextureLoader, pin.src);
+  const ref = useRef<THREE.Group>(null!);
+  const angle = pin.slot * 1.02 + 0.55;
+  const radius = 4.7;
+  const baseY = 0.15 + (pin.slot % 3) * 0.62 - 0.4;
+  const pos = useMemo<[number, number, number]>(
+    () => [Math.sin(angle) * radius, baseY, Math.cos(angle) * radius],
+    [angle, baseY, radius]
+  );
+  const rotY = Math.atan2(pos[0], pos[2]);
+
+  useFrame((state) => {
+    const t = state.clock.elapsedTime;
+    ref.current.position.y = baseY + Math.sin(t * 0.9 + pin.slot * 1.4) * 0.1;
+  });
+
+  return (
+    <group ref={ref} position={pos} rotation={[0, rotY, 0]}>
+      <mesh position={[0, 0, -0.015]}>
+        <planeGeometry args={[2.78, 1.84]} />
+        <meshBasicMaterial color="#0b1317" />
+      </mesh>
+      <mesh>
+        <planeGeometry args={[2.6, 1.64]} />
+        <meshBasicMaterial map={tex} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, -0.96, 0]}>
+        <boxGeometry args={[2.78, 0.055, 0.02]} />
+        <meshBasicMaterial color={accent} />
+      </mesh>
+      <mesh position={[0, 0.96, 0]}>
+        <boxGeometry args={[2.78, 0.02, 0.02]} />
+        <meshBasicMaterial color={accent} transparent opacity={0.4} />
+      </mesh>
+    </group>
+  );
+}
+
+/* ================= grid floor ================= */
+
+function GridFloor({ color }: { color: string }) {
+  const ref = useRef<THREE.GridHelper>(null);
+  useLayoutEffect(() => {
+    const m = ref.current?.material as THREE.Material | undefined;
+    if (m) {
+      m.transparent = true;
+      m.opacity = 0.12;
+    }
+  }, [color]);
+  return <gridHelper key={color} ref={ref} args={[26, 32, color, color]} position={[0, -2.85, 0]} />;
+}
+
+/* ================= interaction scene ================= */
+
+function Scene({
   persona,
   mood,
   beatRef,
+  handRef,
+  objects,
+  pinned,
+  onObjectMove,
+  onCorePulse,
 }: {
   persona: Persona;
   mood: Mood;
   beatRef: BeatRef;
+  handRef: MutableRefObject<HandFrame>;
+  objects: SceneObject[];
+  pinned: PinnedImage[];
+  onObjectMove: (id: string, pos: [number, number, number]) => void;
+  onCorePulse: () => void;
+}) {
+  const { camera, gl } = useThree();
+  const controls = useRef<any>(null);
+  const cursorRef = useRef<THREE.Group>(null);
+  const registry = useRef(new Map<string, THREE.Group>());
+  const baseY = useRef(new Map<string, number>());
+  const spinMap = useRef(new Map<string, number>());
+  const scaleMap = useRef(new Map<string, number>());
+  const drag = useRef<{ id: string; plane: THREE.Plane; offset: THREE.Vector3 } | null>(null);
+  const handGrab = useRef<{ id: string; plane: THREE.Plane; offset: THREE.Vector3 } | null>(null);
+  const lastPulse = useRef(0);
+
+  const raycaster = useMemo(() => new THREE.Raycaster(), []);
+  const tmp = useMemo(
+    () => ({
+      ndc: new THREE.Vector2(),
+      v: new THREE.Vector3(),
+      camDir: new THREE.Vector3(),
+      origin: new THREE.Vector3(0, 0, 0),
+    }),
+    []
+  );
+
+  const register = useCallback((id: string, g: THREE.Group | null) => {
+    if (g) registry.current.set(id, g);
+    else registry.current.delete(id);
+  }, []);
+
+  useEffect(() => {
+    for (const o of objects) {
+      if (!baseY.current.has(o.id)) baseY.current.set(o.id, o.position[1]);
+      spinMap.current.set(o.id, o.spin);
+      scaleMap.current.set(o.id, o.scale);
+    }
+  }, [objects]);
+
+  /* ---- mouse drag ---- */
+  const onDown = useCallback(
+    (e: any, id: string) => {
+      e.stopPropagation();
+      const g = registry.current.get(id);
+      if (!g) return;
+      try {
+        (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+      } catch {
+        /* noop */
+      }
+      tmp.camDir.copy(camera.position).normalize();
+      const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(tmp.camDir, g.position);
+      const hit = new THREE.Vector3();
+      e.ray.intersectPlane(plane, hit);
+      drag.current = { id, plane, offset: g.position.clone().sub(hit) };
+      if (controls.current) controls.current.enabled = false;
+      document.body.style.cursor = "grabbing";
+    },
+    [camera, tmp]
+  );
+
+  useEffect(() => {
+    const move = (ev: PointerEvent) => {
+      if (!drag.current) return;
+      const rect = gl.domElement.getBoundingClientRect();
+      tmp.ndc.set(
+        ((ev.clientX - rect.left) / rect.width) * 2 - 1,
+        -((ev.clientY - rect.top) / rect.height) * 2 + 1
+      );
+      raycaster.setFromCamera(tmp.ndc, camera);
+      const g = registry.current.get(drag.current.id);
+      if (!g) return;
+      if (raycaster.ray.intersectPlane(drag.current.plane, tmp.v)) {
+        tmp.v.add(drag.current.offset);
+        g.position.set(clamp(tmp.v.x, -6, 6), clamp(tmp.v.y, -2.6, 3.4), clamp(tmp.v.z, -3.5, 3.5));
+      }
+    };
+    const up = () => {
+      if (!drag.current) return;
+      const g = registry.current.get(drag.current.id);
+      if (g) onObjectMove(drag.current.id, [g.position.x, g.position.y, g.position.z]);
+      drag.current = null;
+      if (controls.current) controls.current.enabled = true;
+      document.body.style.cursor = "";
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+  }, [camera, gl, raycaster, tmp, onObjectMove]);
+
+  /* ---- per-frame: hand cursor, hand grab, object animation ---- */
+  useFrame((state, dt) => {
+    const t = state.clock.elapsedTime;
+    const hand = handRef.current;
+    const sinceBeat = performance.now() - beatRef.current.at;
+    const beat = Math.max(0, 1 - sinceBeat / 320);
+
+    // cursor reticle
+    const cursor = cursorRef.current;
+    if (cursor) {
+      cursor.visible = hand.present;
+      if (hand.present) {
+        tmp.ndc.set(hand.x * 2 - 1, -(hand.y * 2 - 1));
+        raycaster.setFromCamera(tmp.ndc, camera);
+        tmp.camDir.copy(camera.position).normalize();
+        const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(tmp.camDir, tmp.origin);
+        if (raycaster.ray.intersectPlane(plane, tmp.v)) cursor.position.copy(tmp.v);
+        cursor.quaternion.copy(camera.quaternion);
+        const s = 1 + hand.pinch * 0.55;
+        cursor.scale.setScalar(THREE.MathUtils.damp(cursor.scale.x, s, 14, dt));
+      }
+    }
+
+    // hand pinch → grab nearest object (screen space)
+    if (hand.present && hand.pinched && !handGrab.current) {
+      const hx = hand.x * 2 - 1;
+      const hy = -(hand.y * 2 - 1);
+      let bestId: string | null = null;
+      let bestD = 0.17;
+      registry.current.forEach((g, id) => {
+        tmp.v.copy(g.position).project(camera);
+        const d = Math.hypot(tmp.v.x - hx, tmp.v.y - hy);
+        if (d < bestD) {
+          bestD = d;
+          bestId = id;
+        }
+      });
+      if (bestId) {
+        const g = registry.current.get(bestId);
+        if (g) {
+          tmp.camDir.copy(camera.position).normalize();
+          const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(tmp.camDir, g.position);
+          tmp.ndc.set(hx, hy);
+          raycaster.setFromCamera(tmp.ndc, camera);
+          const hit = new THREE.Vector3();
+          raycaster.ray.intersectPlane(plane, hit);
+          handGrab.current = { id: bestId, plane, offset: g.position.clone().sub(hit) };
+        }
+      } else {
+        // pet the core
+        tmp.v.set(0, 0, 0).project(camera);
+        const dc = Math.hypot(tmp.v.x - hx, tmp.v.y - hy);
+        const now = performance.now();
+        if (dc < 0.13 && now - lastPulse.current > 1100) {
+          lastPulse.current = now;
+          onCorePulse();
+        }
+      }
+    }
+
+    // hand grab movement / release
+    if (handGrab.current) {
+      const g = registry.current.get(handGrab.current.id);
+      if (!hand.present || !hand.pinched || !g) {
+        if (g) onObjectMove(handGrab.current.id, [g.position.x, g.position.y, g.position.z]);
+        handGrab.current = null;
+      } else {
+        tmp.ndc.set(hand.x * 2 - 1, -(hand.y * 2 - 1));
+        raycaster.setFromCamera(tmp.ndc, camera);
+        if (raycaster.ray.intersectPlane(handGrab.current.plane, tmp.v)) {
+          tmp.v.add(handGrab.current.offset);
+          g.position.set(clamp(tmp.v.x, -6, 6), clamp(tmp.v.y, -2.6, 3.4), clamp(tmp.v.z, -3.5, 3.5));
+        }
+      }
+    }
+
+    // object ambience
+    registry.current.forEach((g, id) => {
+      const held = drag.current?.id === id || handGrab.current?.id === id;
+      if (!held) {
+        const base = baseY.current.get(id) ?? g.position.y;
+        g.position.y = base + Math.sin(t * 1.1 + g.position.x * 1.7) * 0.09;
+        g.rotation.y += (spinMap.current.get(id) ?? 0.4) * dt;
+        g.rotation.x += (spinMap.current.get(id) ?? 0.4) * dt * 0.35;
+      } else {
+        g.rotation.y += dt * 1.6;
+      }
+      const baseScale = scaleMap.current.get(id) ?? 1;
+      const target = baseScale * (held ? 1.22 : 1 + beat * 0.07);
+      const cur = g.scale.x;
+      g.scale.setScalar(THREE.MathUtils.damp(cur, target, 10, dt));
+    });
+  });
+
+  return (
+    <>
+      <Avatar persona={persona} mood={mood} beatRef={beatRef} />
+      <GridFloor color={persona.accent} />
+
+      {objects.map((o) => (
+        <ForgeObject key={o.id} obj={o} register={register} onDown={onDown} />
+      ))}
+
+      <Suspense fallback={null}>
+        {pinned.map((p) => (
+          <TexBoundary key={p.id}>
+            <PinnedImagePlane pin={p} accent={persona.accent} />
+          </TexBoundary>
+        ))}
+      </Suspense>
+
+      {/* barehands cursor reticle */}
+      <group ref={cursorRef} visible={false}>
+        <mesh>
+          <ringGeometry args={[0.14, 0.175, 36]} />
+          <meshBasicMaterial color={persona.accent} transparent opacity={0.95} side={THREE.DoubleSide} />
+        </mesh>
+        <mesh>
+          <circleGeometry args={[0.035, 16]} />
+          <meshBasicMaterial color="#eaf4f3" side={THREE.DoubleSide} />
+        </mesh>
+        <mesh>
+          <ringGeometry args={[0.26, 0.268, 48]} />
+          <meshBasicMaterial color={persona.accent} transparent opacity={0.3} side={THREE.DoubleSide} />
+        </mesh>
+      </group>
+
+      <OrbitControls
+        ref={controls}
+        enablePan={false}
+        enableZoom
+        minDistance={4.2}
+        maxDistance={13}
+        autoRotate
+        autoRotateSpeed={mood === "thinking" ? 2.4 : 0.55}
+        minPolarAngle={Math.PI / 3.2}
+        maxPolarAngle={Math.PI / 1.62}
+        enableDamping
+        dampingFactor={0.08}
+      />
+    </>
+  );
+}
+
+/* ================= root ================= */
+
+export default function Assistant3D({
+  persona,
+  mood,
+  beatRef,
+  handRef,
+  objects,
+  pinned,
+  onObjectMove,
+  onCorePulse,
+}: {
+  persona: Persona;
+  mood: Mood;
+  beatRef: BeatRef;
+  handRef: MutableRefObject<HandFrame>;
+  objects: SceneObject[];
+  pinned: PinnedImage[];
+  onObjectMove: (id: string, pos: [number, number, number]) => void;
+  onCorePulse: () => void;
 }) {
   return (
-    <Canvas dpr={[1, 2]} camera={{ position: [0, 0.25, 6.4], fov: 42 }} gl={{ antialias: true, alpha: true }}>
+    <Canvas dpr={[1, 2]} camera={{ position: [0, 0.25, 6.6], fov: 42 }} gl={{ antialias: true, alpha: true }}>
       <ambientLight intensity={0.55} />
       <directionalLight position={[4, 5, 6]} intensity={0.9} color="#dff5f2" />
       <pointLight color="#ffb46b" intensity={0.8} position={[4.5, 2.5, -4]} distance={15} />
-      <Avatar persona={persona} mood={mood} beatRef={beatRef} />
-      <OrbitControls
-        enablePan={false}
-        enableZoom={false}
-        autoRotate
-        autoRotateSpeed={mood === "thinking" ? 2.4 : 0.7}
-        minPolarAngle={Math.PI / 3}
-        maxPolarAngle={Math.PI / 1.65}
-        enableDamping
-        dampingFactor={0.08}
+      <Scene
+        persona={persona}
+        mood={mood}
+        beatRef={beatRef}
+        handRef={handRef}
+        objects={objects}
+        pinned={pinned}
+        onObjectMove={onObjectMove}
+        onCorePulse={onCorePulse}
       />
     </Canvas>
   );

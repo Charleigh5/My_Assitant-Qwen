@@ -16,6 +16,13 @@ export type Intent =
   | "slower"
   | "switch"
   | "recon"
+  | "gods_on"
+  | "gods_off"
+  | "navigate"
+  | "weather"
+  | "layer"
+  | "feed"
+  | "webrtc"
   | "image"
   | "spawn"
   | "clear"
@@ -42,6 +49,8 @@ export interface IntentDetails {
   personaId?: PersonaId;
   imagePrompt?: string;
   reconObject?: string;
+  navTarget?: string;
+  weatherTarget?: string;
   shape?: ShapeKind;
   color?: string;
 }
@@ -112,6 +121,23 @@ export function detectIntent(text: string): Intent {
 
   if (/(reconstruct|reconstruction|reference ?board|ref board|model sheet|spec ?sheet|blueprint|turnaround|recon board|recon sheet|\brecon\b)/i.test(t)) return "recon";
 
+  if (/\b(god'?s ?eye|world map|the globe|orbital (view|mode|layer)|open the map|big map|earth view|map view|surveillance view)\b/i.test(t)) return "gods_on";
+  if (/\b(back to core|close the map|exit (the )?map|core view|leave god|back to (the )?avatar)\b/i.test(t)) return "gods_off";
+  if (/\b(weather|forecast|temperature|air quality|aqi|how (hot|cold|warm)|is it raining|wind speed)\b/i.test(t)) return "weather";
+  if (
+    (/\b(satellite|imagery|street|true ?color|thermal|transit|rail(way)?)\b/i.test(t) && /\b(view|layer|map|mode|basemap|on)\b/i.test(t)) ||
+    /\b(switch basemap|basemap|change (the )?map)\b/i.test(t)
+  )
+    return "layer";
+  if (/\b(cctv|webcam|camera feed|live feed|footage|video feed)\b/i.test(t)) return "feed";
+  if (/\b(webrtc|secure link|peer link|video link|stream to me|encrypted link)\b/i.test(t)) return "webrtc";
+
+  const navMatch = t.match(/\b(?:fly to|navigate to|take me to|go to|zoom to|pan to|show me|locate|find)\s+(.+)/i);
+  if (navMatch) {
+    const target = navMatch[1].replace(/[.?!]+$/, "").trim();
+    if (target && !/\b(what|how|why|when|who|your|you can|the weather|me (a|an|the|some))\b/i.test(target)) return "navigate";
+  }
+
   const imageHit =
     /(image|picture|artwork|art piece|portrait|poster|illustration|photo|wallpaper|drawing|painting|scene of)/i.test(t) ||
     /^(imagine|draw|paint|sketch)\b/i.test(t);
@@ -135,6 +161,19 @@ export function extractDetails(text: string): IntentDetails {
   const personaId = name && PERSONAS.some((p) => p.id === name) ? name : undefined;
   const shapeWord = Object.keys(SHAPES).find((k) => new RegExp(`\\b${k}\\b`, "i").test(t));
   const colorWord = Object.keys(COLOR_WORDS).find((k) => new RegExp(`\\b${k}\\b`, "i").test(t));
+
+  const navM = t.match(/\b(?:fly to|navigate to|take me to|go to|zoom to|pan to|show me|locate|find)\s+(.+)/i);
+  let navTarget: string | undefined;
+  if (navM) {
+    navTarget = navM[1]
+      .replace(/[.?!]+$/, "")
+      .replace(/\b(please|for me|right now|now)\b/gi, "")
+      .replace(/\s{2,}/g, " ")
+      .trim() || undefined;
+  }
+  const wxM = t.match(/\b(?:weather|forecast|temperature|air quality)\s+(?:in|for|at)\s+(.+)/i);
+  const weatherTarget = wxM?.[1]?.replace(/[.?!]+$/, "").trim() || undefined;
+
   return {
     genre,
     personaId,
@@ -142,6 +181,8 @@ export function extractDetails(text: string): IntentDetails {
     color: colorWord ? COLOR_WORDS[colorWord] : undefined,
     imagePrompt: cleanImagePrompt(text),
     reconObject: cleanReconObject(text),
+    navTarget,
+    weatherTarget,
   };
 }
 
@@ -184,6 +225,8 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     help: ["Modules online: ① four persona cores ② generative music — “make a lofi beat” ③ image synthesis — “draw a neon fox” ④ object forge — “spawn a teal torus” ⑤ Barehands pinch control — “hands on” ⑥ live voice — “listen” ⑦ recon boards — “reconstruct an espresso machine”. Everything is wired to everything."],
     reconStart: ["Reconstruction protocol engaged for “{object}”. Drafting hero iso, six ortho views, material palette, macro details, section and the full QA gauntlet. Check the RECON tab."],
     reconDone: ["Sheet REV A for “{object}” is complete. Full disclosure: with a text prompt and no source imagery, every hidden face is stamped ARTIST_AUTHORED and every dimension is ESTIMATED — feed me reference images and I'll upgrade the evidence."],
+    godsOn: ["God's Eye online. I now see the entire planet — say “fly to” plus any place on Earth, ask for weather, or request the seismic, fire, event and satellite overlays."],
+    wx: ["Telemetry locked on {place}: {temp}°C and {label}, feels like {feels}°. Wind {wind} km/h {dir}, humidity {hum}%, pressure {pres} hPa. Air quality {aqi} ({aqiLabel})."],
   },
   ember: {
     imageStart: ["“{prompt}”?! Oh, I'm ON it. Don't blink — okay, blink, it takes a few seconds."],
@@ -194,6 +237,8 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     help: ["The menu: music (“drop a house banger”), art (“imagine a lava whale”), 3D toys (“spawn a gem”), hands (“hands on”), voice (“listen”). Or just talk — I'll freestyle."],
     reconStart: ["“{object}” — oh, we're doing a FULL SHEET?! Hero view, ortho turnaround, materials, macro callouts, the works. RECON tab. Go go go."],
     reconDone: ["DONE. “{object}” sheet, REV A, absolutely loaded. I stamped every guess as ARTIST_AUTHORED because I'm chaotic, not a liar. Bring me reference photos and watch the board level up."],
+    godsOn: ["GOD'S EYE, BABY!! The whole planet on one screen — earthquakes, fires, satellites, LIVE. Say “fly to” plus a place and I'll take us there."],
+    wx: ["Okay okay — {place} is giving {temp}°C, {label}, feels like {feels}°. Wind {wind} km/h {dir}, humidity {hum}%. Air's {aqiLabel}. Screenshot THAT."],
   },
   atlas: {
     imageStart: ["Briefing received: “{prompt}”. Render is underway — patience is a tactic."],
@@ -204,6 +249,8 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     help: ["Six levers: personas, music (“make synthwave”), images (“paint a quiet harbor”), objects (“add a copper sphere”), barehands (“hands on”), voice (“listen”). Pull whichever moves you."],
     reconStart: ["Understood — drafting a reconstruction board for “{object}”. Hero reference, orthographic set, silhouette analysis, materials, construction section and QA targets, in that order. The RECON tab is your drawing board."],
     reconDone: ["“{object}”, sheet REV A, on the board. Note the evidence column: text-only input means estimated dimensions and artist-authored hidden geometry — supply references when you can and the board becomes a contract, not a hypothesis."],
+    godsOn: ["Observation deck is open. I have global coverage — weather, seismic, wildfire, orbital assets and live feeds. Give me a destination and I'll navigate."],
+    wx: ["Situation report for {place}: {temp}°C, {label}, feels like {feels}°. Wind {wind} km/h {dir}, humidity {hum}%, pressure {pres} hPa. Air quality {aqi} — {aqiLabel}."],
   },
   lyra: {
     imageStart: ["I'm closing my eyes to see “{prompt}” more clearly… it's taking shape…"],
@@ -214,6 +261,8 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     help: ["I can sing beats (“make ambient music”), weave pictures (“draw the sound of rain”), shape floating objects (“spawn a violet knot”), feel your hands (“hands on”), and hear your voice (“listen”). Shall we begin?"],
     reconStart: ["I'll draw “{object}” the way an engineer dreams — every angle, every seam, every material, laid out like a love letter to whoever builds it next. Watch the RECON tab unroll…"],
     reconDone: ["The sheet for “{object}” is finished. I marked all my inventions honestly — artist-authored, like all dreams are. Show me the real thing someday and I'll redraw it true."],
+    godsOn: ["Oh… I can see the whole world now. It's breathing — fires, storms, satellites circling like slow thoughts. Tell me where to look."],
+    wx: ["I listened to {place} for you: {temp}°C, {label}, feels like {feels}°. The wind is {wind} km/h from the {dir}, humidity {hum}%. The air reads {aqi} — {aqiLabel}."],
   },
 };
 
@@ -222,11 +271,27 @@ const SHARED: Record<string, string> = {
   voiceOn: "Listening… speak freely — I'll transcribe it, and if my voice is on, I'll answer out loud.",
   voiceOff: "Microphone cold, speakers quiet. Silence, my old friend.",
   clear_zero: "Nothing to clear — the field was already still.",
+  godsOff: "God's Eye powered down. Back to the core — but the planet keeps turning either way.",
+  wxNoFocus: "I need a place first. Say “fly to {city}” and I'll read the sky for you there.",
+  navNotFound: "I couldn't pin that to the map. Try a city, landmark or region — I'll lock on and pull live telemetry.",
+  layerDone: "Layer updated. The overlays are live on the observation deck.",
+  feedDone: "Feed monitor is up — I've routed a public HLS stream to the deck. Point me at your own endpoint anytime.",
+  webrtcDone: "Secure link engaged. I'm streaming the observation canvas over an encrypted peer connection — that's real WebRTC under the hood.",
 };
 
 export function extraLine(
   personaId: PersonaId,
-  key: keyof (typeof EX)["nova"] | "handsOff" | "voiceOn" | "voiceOff",
+  key:
+    | keyof (typeof EX)["nova"]
+    | "handsOff"
+    | "voiceOn"
+    | "voiceOff"
+    | "godsOff"
+    | "wxNoFocus"
+    | "navNotFound"
+    | "layerDone"
+    | "feedDone"
+    | "webrtcDone",
   vars: Record<string, string | number> = {},
 ): string {
   const bank = EX[personaId][key];

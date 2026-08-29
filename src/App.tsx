@@ -34,6 +34,10 @@ import LiveStream from "./components/LiveStream";
 import ReconPanel from "./components/ReconBoard";
 import { createBoard, exportSheet, sectionPrompt } from "./lib/reconBoard";
 import type { Board, SectionKey } from "./lib/reconBoard";
+import GodsEye from "./components/GodsEye";
+import type { FocusPoint, GodsEyeApi } from "./components/GodsEye";
+import { geocode, windDirName } from "./lib/godsEye";
+import type { AirNow, WeatherNow } from "./lib/godsEye";
 import { FORGE_COLORS } from "./lib/sceneTypes";
 import type { PinnedImage, SceneObject, ShapeKind } from "./lib/sceneTypes";
 
@@ -136,6 +140,15 @@ export default function App() {
   useEffect(() => {
     boardRef.current = board;
   }, [board]);
+
+  /* ---------- god's eye observation deck ---------- */
+  const [viewMode, setViewMode] = useState<"core" | "gods">("core");
+  const godsApiRef = useRef<GodsEyeApi | null>(null);
+  const [focusPoint, setFocusPoint] = useState<FocusPoint | null>(null);
+  const focusPointRef = useRef<FocusPoint | null>(null);
+  useEffect(() => {
+    focusPointRef.current = focusPoint;
+  }, [focusPoint]);
   const [objects, setObjects] = useState<SceneObject[]>([]);
   const [pinned, setPinned] = useState<PinnedImage[]>([]);
   const [log, setLog] = useState<LogEntry[]>([]);
@@ -440,6 +453,44 @@ export default function App() {
     });
   }, [addLog]);
 
+  /* ---------- god's eye navigation ---------- */
+
+  const navTo = useCallback(
+    async (target: string) => {
+      setViewMode("gods");
+      const place = await geocode(target);
+      if (!place) {
+        reply(extraLine(personaIdRef.current, "navNotFound"));
+        addLog(`god's eye: could not locate “${target}”`);
+        return;
+      }
+      godsApiRef.current?.flyTo(place.lat, place.lon, 9, place.name);
+      addLog(`god's eye: nav → ${place.name}`);
+    },
+    [addLog, reply]
+  );
+
+  const onWeatherReport = useCallback(
+    (place: FocusPoint, w: WeatherNow | null, a: AirNow | null) => {
+      if (!w) return;
+      const vars = {
+        place: place.label,
+        temp: Math.round(w.temp),
+        label: w.label.toLowerCase(),
+        feels: Math.round(w.feels),
+        wind: Math.round(w.wind),
+        dir: windDirName(w.windDir),
+        hum: w.humidity,
+        pres: Math.round(w.pressure),
+        aqi: a ? a.aqi : "n/a",
+        aqiLabel: a ? a.label.toLowerCase() : "unknown",
+      };
+      reply(extraLine(personaIdRef.current, "wx", vars));
+      addLog(`god's eye: telemetry for ${place.label}`);
+    },
+    [addLog, reply]
+  );
+
   const route = useCallback(
     (text: string) => {
       const intent = detectIntent(text);
@@ -502,6 +553,69 @@ export default function App() {
           const object = det.reconObject ?? "mystery artifact";
           reply(extraLine(pid, "reconStart", { object }));
           startRecon(object);
+          return;
+        }
+        case "gods_on": {
+          setViewMode("gods");
+          reply(extraLine(pid, "godsOn"));
+          addLog("god's eye: observation deck opened");
+          return;
+        }
+        case "gods_off": {
+          setViewMode("core");
+          reply(extraLine(pid, "godsOff"));
+          addLog("god's eye: deck closed, back to core");
+          return;
+        }
+        case "navigate": {
+          const target = det.navTarget;
+          if (!target) {
+            reply(simpleLine(pid, "fallback"));
+            return;
+          }
+          void navTo(target);
+          return;
+        }
+        case "weather": {
+          const wt = det.weatherTarget;
+          if (wt) {
+            void navTo(wt);
+          } else if (focusPointRef.current) {
+            setViewMode("gods");
+            const f = focusPointRef.current;
+            godsApiRef.current?.flyTo(f.lat, f.lon, 8, f.label);
+            addLog(`god's eye: re-query telemetry for ${f.label}`);
+          } else {
+            reply(extraLine(pid, "wxNoFocus"));
+          }
+          return;
+        }
+        case "layer": {
+          setViewMode("gods");
+          const api = godsApiRef.current;
+          if (/street/i.test(text)) api?.setBase("streets");
+          else if (/imagery|satellite/i.test(text)) api?.setBase("imagery");
+          else if (/true ?color|terra/i.test(text)) api?.setBase("truecolor");
+          else if (/fire|thermal/i.test(text)) api?.setOverlay("fires", true);
+          else if (/rail|transit/i.test(text)) api?.setOverlay("transit", true);
+          else if (/seismic|earthquake/i.test(text)) api?.setOverlay("seismic", true);
+          else if (/event/i.test(text)) api?.setOverlay("events", true);
+          else if (/sat\b|satellite/i.test(text)) api?.setBase("imagery");
+          reply(extraLine(pid, "layerDone"));
+          addLog("god's eye: layer adjusted");
+          return;
+        }
+        case "feed": {
+          setViewMode("gods");
+          godsApiRef.current?.setFeed("f1");
+          reply(extraLine(pid, "feedDone"));
+          addLog("god's eye: feed monitor opened");
+          return;
+        }
+        case "webrtc": {
+          setViewMode("gods");
+          godsApiRef.current?.engageLink();
+          reply(extraLine(pid, "webrtcDone"));
           return;
         }
         case "image": {
@@ -691,11 +805,12 @@ export default function App() {
     const other = PERSONAS.find((x) => x.id !== personaId)!;
     return [
       "make a lofi beat",
+      "fly to tokyo",
+      "god's eye",
+      "weather in paris",
       "draw a neon fox",
-      "reconstruct a leather aviator jacket",
       "spawn a teal torus",
       "hands on",
-      "listen",
       `switch to ${other.name.toLowerCase()}`,
     ];
   }, [personaId]);
@@ -888,6 +1003,33 @@ export default function App() {
           />
 
           <ModuleRow
+            title="GOD'S EYE"
+            sub={
+              viewMode === "gods"
+                ? focusPoint
+                  ? `ON DECK · ${focusPoint.label.toUpperCase()}`
+                  : "ON DECK · GLOBAL OBSERVATION"
+                : "MAP · WEATHER · SEISMIC · SATS · FEEDS"
+            }
+            right={
+              <button
+                onClick={() => {
+                  setViewMode(viewMode === "gods" ? "core" : "gods");
+                  addLog(viewMode === "gods" ? "god's eye: deck closed" : "god's eye: deck opened");
+                }}
+                className="border px-2 py-1 font-mono text-[8px] tracking-[0.16em] transition-all hover:-translate-y-px"
+                style={{
+                  borderColor: viewMode === "gods" ? "#9be15d99" : `${persona.accent}66`,
+                  color: viewMode === "gods" ? "#9be15d" : persona.accent,
+                  background: viewMode === "gods" ? "rgba(155,225,93,0.08)" : alpha(persona.accent, 0.08),
+                }}
+              >
+                {viewMode === "gods" ? "ON DECK" : "OPEN DECK →"}
+              </button>
+            }
+          />
+
+          <ModuleRow
             title="LIVE STREAM"
             sub={
               liveOpen
@@ -956,16 +1098,33 @@ export default function App() {
       {/* ============ CENTER · stage + dock ============ */}
       <main className="z-10 flex min-w-0 flex-1 flex-col">
         <div className="relative min-h-0 flex-1">
-          <Assistant3D
-            persona={persona}
-            mood={mood}
-            beatRef={beatRef}
-            handRef={handFrameRef}
-            objects={objects}
-            pinned={pinned}
-            onObjectMove={onObjectMove}
-            onCorePulse={onCorePulse}
-          />
+          <div
+            className={`absolute inset-0 transition-opacity duration-500 ${
+              viewMode === "gods" ? "pointer-events-none opacity-0" : "opacity-100"
+            }`}
+          >
+            <Assistant3D
+              persona={persona}
+              mood={mood}
+              beatRef={beatRef}
+              handRef={handFrameRef}
+              objects={objects}
+              pinned={pinned}
+              onObjectMove={onObjectMove}
+              onCorePulse={onCorePulse}
+            />
+          </div>
+
+          <div className={`absolute inset-0 ${viewMode === "gods" ? "" : "pointer-events-none invisible"}`}>
+            <GodsEye
+              active={viewMode === "gods"}
+              accent={persona.accent}
+              apiRef={godsApiRef}
+              onWeatherReport={onWeatherReport}
+              onFocusChange={setFocusPoint}
+              onLog={addLog}
+            />
+          </div>
 
           {/* HUD corners */}
           <span className="hud-corner left-3 top-3 border-l-2 border-t-2" />

@@ -1,6 +1,6 @@
 import { Component, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
-import Assistant3D from "./components/Assistant3D";
+import Assistant3D, { FallbackCore } from "./components/Assistant3D";
 import type { BeatRef } from "./components/Assistant3D";
 import StudioPanel from "./components/StudioPanel";
 import ChatPanel from "./components/ChatPanel";
@@ -1696,44 +1696,30 @@ function AppInner() {
                 />
               </StageBoundary>
 
-              {/* ignition veil — visible until the renderer reports its first frame */}
-              {!coreReady && !coreStalled && (
-                <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-ink-950/85">
-                  <div className="flex items-center gap-2">
-                    {[0, 1, 2].map((i) => (
-                      <span key={i} className="tdot h-1.5 w-1.5 rounded-full" style={{ background: persona.accent }} />
-                    ))}
-                  </div>
-                  <p className="font-mono text-[10px] tracking-[0.32em]" style={{ color: persona.accent }}>
-                    IGNITING CORE
-                  </p>
-                  <p className="font-mono text-[8px] tracking-[0.18em] text-mist-600">ALLOCATING WEBGL CONTEXT…</p>
-                </div>
-              )}
-
-              {/* stall diagnostics — the viewport can never fail silently */}
-              {coreStalled && (
-                <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2.5 bg-ink-950/95 p-4 text-center">
-                  <p className="font-mono text-[10px] tracking-[0.28em] text-atlas">CORE STALLED — NO FIRST FRAME</p>
-                  <p className="max-w-[420px] font-mono text-[8.5px] leading-relaxed tracking-[0.12em] text-mist-500">
-                    THE RENDERER MOUNTED BUT NEVER DREW A FRAME. USUAL CAUSES: GPU PROCESS CRASH, HARDWARE ACCELERATION DISABLED, OR AN EXTENSION BLOCKING WEBGL.
-                  </p>
-                  <p className="font-mono text-[8px] tracking-[0.16em]" style={{ color: webglProbe ? "#9be15d" : "#ff5d5d" }}>
-                    WEBGL PROBE: {webglProbe ? "CONTEXT AVAILABLE" : "CONTEXT UNAVAILABLE"}
-                  </p>
-                  <button
-                    onClick={() => {
-                      coreReadyRef.current = false;
-                      setCoreReady(false);
-                      setCoreStalled(false);
-                      setStageEpoch((e) => e + 1);
-                      addLog("core: reboot requested");
-                    }}
-                    className="mt-1 border border-atlas px-4 py-2 font-mono text-[9px] tracking-[0.24em] text-atlas transition-all hover:-translate-y-px hover:bg-atlas/10"
-                  >
-                    REBOOT CORE
-                  </button>
-                </div>
+              {/* the assistant is ALWAYS visible: until the GPU renderer reports its
+                  first frame, the living CPU avatar holds the frame — ignition,
+                  stall, and reboot all happen around it, never instead of it */}
+              {!coreReady && (
+                <FallbackCore
+                  accent={persona.accent}
+                  mood={mood}
+                  note={
+                    coreStalled
+                      ? `GPU STALLED · WEBGL PROBE: ${webglProbe ? "AVAILABLE" : "UNAVAILABLE"} · CPU AVATAR HOLDING THE FRAME`
+                      : "IGNITING GPU RENDERER…"
+                  }
+                  onReboot={
+                    coreStalled
+                      ? () => {
+                          coreReadyRef.current = false;
+                          setCoreReady(false);
+                          setCoreStalled(false);
+                          setStageEpoch((e) => e + 1);
+                          addLog("core: reboot requested");
+                        }
+                      : undefined
+                  }
+                />
               )}
 
               {/* PIP corner ticks + LIVE badge */}

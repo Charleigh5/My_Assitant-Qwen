@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { useRef } from "react";
+import { useEffect } from "react";
 import type { GeneratedImage } from "../lib/imageGen";
 import type { SceneObject, ShapeKind } from "../lib/sceneTypes";
 import { FORGE_COLORS, SHAPE_KINDS } from "../lib/sceneTypes";
+import { PROFILES, auditConsole, auditScore } from "../lib/taste";
+import type { TasteProfile } from "../lib/taste";
 
-export type DockTab = "studio" | "gallery" | "forge" | "recon" | "kernel";
+export type DockTab = "studio" | "gallery" | "forge" | "recon" | "kernel" | "taste";
 
 /* ---------- tab bar ---------- */
 
@@ -31,6 +34,7 @@ export function DockBar({
     { id: "forge", label: "OBJECT FORGE", count: objectCount },
     { id: "recon", label: "RECON", count: reconCount },
     { id: "kernel", label: "KERNEL", count: kernelCount },
+    { id: "taste", label: "TASTE SKILL" },
   ];
   return (
     <div className="flex items-end gap-1 border-b border-ink-700/70 bg-ink-900/80 px-2 pt-1.5">
@@ -297,20 +301,27 @@ export function ObjectForge({
   onRemove,
   onClear,
   accent,
+  palette,
 }: {
   objects: SceneObject[];
   onSpawn: (shape: ShapeKind, color: string) => void;
   onRemove: (id: string) => void;
   onClear: () => void;
   accent: string;
+  palette?: string[];
 }) {
-  const [color, setColor] = useState(FORGE_COLORS[0]);
+  const swatches = palette && palette.length ? palette : FORGE_COLORS;
+  const [color, setColor] = useState(swatches[0]);
+  useEffect(() => {
+    if (!swatches.includes(color)) setColor(swatches[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [palette]);
   return (
-    <div className="flex h-full gap-4 p-2.5">
+    <div className="flex h-full flex-col gap-3 overflow-y-auto p-2.5 sm:flex-row sm:gap-4 sm:overflow-visible">
       <div className="flex flex-col gap-2">
         <span className="font-mono text-[8px] tracking-[0.22em] text-mist-500">MATERIAL</span>
         <div className="flex flex-wrap gap-1.5" style={{ maxWidth: 150 }}>
-          {FORGE_COLORS.map((c) => (
+          {swatches.map((c) => (
             <button
               key={c}
               onClick={() => setColor(c)}
@@ -333,13 +344,13 @@ export function ObjectForge({
         </button>
       </div>
 
-      <div className="h-full w-px bg-ink-700/70" />
+      <div className="hidden h-full w-px bg-ink-700/70 sm:block" />
 
       <div className="flex flex-1 flex-col gap-1.5 overflow-hidden">
         <span className="font-mono text-[8px] tracking-[0.22em] text-mist-500">
           FORGE A PRIMITIVE — <span style={{ color: accent }}>CLICK TO DEPLOY</span>
         </span>
-        <div className="grid flex-1 grid-cols-7 content-start gap-1.5">
+        <div className="grid flex-1 grid-cols-4 content-start gap-1.5 sm:grid-cols-7">
           {SHAPE_KINDS.map((k) => (
             <button
               key={k}
@@ -380,6 +391,186 @@ export function ObjectForge({
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- taste skill ---------- */
+
+export function TastePanel({
+  profile,
+  accent,
+  onApply,
+  onEvent,
+}: {
+  profile: TasteProfile;
+  accent: string;
+  onApply: (id: string) => void;
+  onEvent: (msg: string) => void;
+}) {
+  const [checks, setChecks] = useState(() => auditConsole(profile));
+  const [flash, setFlash] = useState(false);
+
+  useEffect(() => {
+    setChecks(auditConsole(profile));
+  }, [profile]);
+
+  const runAudit = () => {
+    setChecks(auditConsole(profile));
+    setFlash(true);
+    window.setTimeout(() => setFlash(false), 900);
+    onEvent(`taste: audit run — ${auditScore(auditConsole(profile))} locks held`);
+  };
+
+  return (
+    <div className="flex h-full min-h-0">
+      {/* profile rail */}
+      <aside className="flex w-44 shrink-0 flex-col gap-1 overflow-y-auto border-r border-ink-700/70 bg-ink-900/60 p-1.5">
+        <span className="px-1 pb-1 font-mono text-[7.5px] tracking-[0.24em] text-mist-600">DESIGN DIRECTIONS</span>
+        {PROFILES.map((p) => {
+          const active = p.id === profile.id;
+          return (
+            <button
+              key={p.id}
+              onClick={() => onApply(p.id)}
+              className="group border px-2 py-1.5 text-left transition-all hover:-translate-y-px"
+              style={{
+                borderColor: active ? p.accent : "#1c313b",
+                background: active ? `${p.accent}14` : "transparent",
+                boxShadow: active ? `0 0 18px -8px ${p.accent}` : "none",
+              }}
+            >
+              <div className="flex items-center justify-between gap-1">
+                <span className="font-display text-[9px] font-bold tracking-[0.14em]" style={{ color: active ? p.accent : "#c2d8d6" }}>
+                  {p.name}
+                </span>
+                {active && (
+                  <span className="px-1 font-mono text-[6.5px] tracking-[0.16em]" style={{ background: `${p.accent}22`, color: p.accent }}>
+                    ACTIVE
+                  </span>
+                )}
+              </div>
+              <div className="mt-1 flex gap-[2px]">
+                {p.palette.map((c) => (
+                  <span key={c} className="h-1.5 flex-1" style={{ background: c }} />
+                ))}
+              </div>
+              <p className="mt-1 line-clamp-2 font-mono text-[7px] leading-snug tracking-[0.06em] text-mist-600 group-hover:text-mist-500">
+                {p.brief}
+              </p>
+            </button>
+          );
+        })}
+      </aside>
+
+      {/* doctrine */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-ink-700/70 bg-ink-900/70 px-3 py-2">
+          <div className="min-w-0">
+            <p className="font-display text-[13px] font-extrabold tracking-[0.12em] text-mist-100">
+              {profile.name} <span style={{ color: profile.accent }}>— ANTI-SLOP DOCTRINE</span>
+            </p>
+            <p className="truncate font-mono text-[8px] tracking-[0.14em] text-mist-600">{profile.brief.toUpperCase()}</p>
+          </div>
+          <span
+            className="shrink-0 border px-2 py-1 font-mono text-[8px] tracking-[0.18em]"
+            style={{ borderColor: `${profile.accent}66`, color: profile.accent, background: `${profile.accent}10` }}
+          >
+            APPLIES TO · IMAGES · 3D · UI
+          </span>
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-2.5">
+          {/* locks + bans */}
+          <div className="grid grid-cols-1 gap-2.5 min-[420px]:grid-cols-2">
+            <div className="border border-ink-700/60 bg-ink-900/40">
+              <p className="border-b border-ink-700/60 px-2 py-1 font-mono text-[7.5px] tracking-[0.24em] text-lyra">◈ LOCKS — ALWAYS</p>
+              <ul className="space-y-1 p-2">
+                {profile.locks.map((l) => (
+                  <li key={l} className="flex gap-1.5 font-mono text-[8px] leading-snug tracking-[0.04em] text-mist-300">
+                    <span className="mt-px shrink-0 text-lyra">✓</span>
+                    {l}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="border border-ink-700/60 bg-ink-900/40">
+              <p className="border-b border-ink-700/60 px-2 py-1 font-mono text-[7.5px] tracking-[0.24em] text-ember">⊘ BANS — NEVER</p>
+              <ul className="space-y-1 p-2">
+                {profile.bans.map((b) => (
+                  <li key={b} className="flex gap-1.5 font-mono text-[8px] leading-snug tracking-[0.04em] text-mist-300">
+                    <span className="mt-px shrink-0 text-ember">✕</span>
+                    <b className="font-normal line-through decoration-ember/50">{b}</b>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          {/* live directive */}
+          <div className="border border-ink-700/60 bg-ink-900/40">
+            <p className="flex items-center justify-between border-b border-ink-700/60 px-2 py-1 font-mono text-[7.5px] tracking-[0.24em]" style={{ color: profile.accent }}>
+              IMAGE DIRECTIVE — APPENDED TO EVERY PROMPT THE AGENT RENDERS
+              <span className="blink">▍</span>
+            </p>
+            <p className="border-l-2 px-2.5 py-1.5 font-mono text-[8.5px] leading-relaxed tracking-[0.04em] text-mist-300" style={{ borderColor: profile.accent }}>
+              {profile.imageDirective}
+            </p>
+          </div>
+
+          {/* three + type + motion */}
+          <div className="grid grid-cols-2 gap-2.5 min-[520px]:grid-cols-3">
+            <div className="border border-ink-700/60 bg-ink-900/40 p-2">
+              <p className="font-mono text-[7px] tracking-[0.22em] text-mist-600">3D DOCTRINE · {profile.three.finish.toUpperCase()}</p>
+              <p className="mt-1 font-mono text-[8px] leading-snug text-mist-300">{profile.three.geometry}</p>
+              <p className="mt-0.5 font-mono text-[8px] leading-snug text-mist-500">{profile.three.material}</p>
+            </div>
+            <div className="border border-ink-700/60 bg-ink-900/40 p-2">
+              <p className="font-mono text-[7px] tracking-[0.22em] text-mist-600">TYPE PAIR</p>
+              <p className="mt-1 font-mono text-[8px] leading-snug text-mist-300">{profile.typePair}</p>
+            </div>
+            <div className="border border-ink-700/60 bg-ink-900/40 p-2">
+              <p className="font-mono text-[7px] tracking-[0.22em] text-mist-600">MOTION</p>
+              <p className="mt-1 font-mono text-[8px] leading-snug text-mist-300">{profile.motion}</p>
+            </div>
+          </div>
+
+          {/* audit */}
+          <div className={`border bg-ink-900/40 transition-shadow duration-500 ${flash ? "" : "border-ink-700/60"}`} style={flash ? { borderColor: profile.accent, boxShadow: `0 0 24px -8px ${profile.accent}` } : undefined}>
+            <p className="flex items-center justify-between border-b border-ink-700/60 px-2 py-1">
+              <span className="font-mono text-[7.5px] tracking-[0.24em] text-mist-300">CONSOLE SELF-AUDIT — {profile.name}</span>
+              <span className="flex items-center gap-2">
+                <span className="font-mono text-[9px] font-bold tracking-[0.14em]" style={{ color: profile.accent }}>
+                  {auditScore(checks)} LOCKS HELD
+                </span>
+                <button
+                  onClick={runAudit}
+                  className="border px-2 py-0.5 font-mono text-[7.5px] tracking-[0.18em] transition-all hover:-translate-y-px"
+                  style={{ borderColor: `${profile.accent}66`, color: profile.accent }}
+                >
+                  RE-RUN ▸
+                </button>
+              </span>
+            </p>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1 p-2">
+              {checks.map((c) => (
+                <div key={c.name} className="flex items-start gap-1.5">
+                  <span
+                    className="mt-px shrink-0 px-1 font-mono text-[6.5px] tracking-[0.14em]"
+                    style={{ background: c.pass ? "rgba(155,225,93,0.12)" : "rgba(245,185,75,0.14)", color: c.pass ? "#9be15d" : "#f5b94b" }}
+                  >
+                    {c.pass ? "PASS" : "WARN"}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-mono text-[7.5px] tracking-[0.1em] text-mist-300">{c.name}</p>
+                    <p className="truncate font-mono text-[6.5px] tracking-[0.06em] text-mist-600" title={c.note}>{c.note}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -58,7 +58,7 @@ export default function HandOverlay({ engine, accent, onClose }: Props) {
 
   return (
     <div
-      className="absolute right-3 top-3 z-20 w-48 overflow-hidden border bg-ink-900/90 backdrop-blur-sm rise-in"
+      className="absolute left-3 top-14 z-20 w-40 overflow-hidden border bg-ink-900/90 backdrop-blur-sm rise-in lg:top-3 lg:w-48"
       style={{ borderColor: `${accent}55`, boxShadow: `0 0 24px -8px ${accent}66` }}
     >
       <div

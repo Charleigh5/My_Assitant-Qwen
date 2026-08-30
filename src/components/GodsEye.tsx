@@ -61,11 +61,12 @@ const OVERLAY_DEFS: { id: OverlayId; label: string }[] = [
   { id: "transit", label: "RAIL" },
 ];
 
+type DeckMode = "camera" | "map";
+
 export default function GodsEye({ active, accent, apiRef, onWeatherReport, onFocusChange, onLog }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const feedVideoRef = useRef<HTMLVideoElement>(null);
-  const linkVideoRef = useRef<HTMLVideoElement>(null);
 
   const view = useRef({ lat: 18, lon: 8, zoom: 2.7 });
   const anim = useRef<null | { fLat: number; fLon: number; fZ: number; tLat: number; tLon: number; tZ: number; t0: number; dur: number; label?: string }>(null);
@@ -73,6 +74,11 @@ export default function GodsEye({ active, accent, apiRef, onWeatherReport, onFoc
   const failedTiles = useRef(new Set<string>());
   const accentRef = useRef(accent);
   accentRef.current = accent;
+
+  /* camera is the default face of the deck — open it and you see the live feed */
+  const [mode, setMode] = useState<DeckMode>("camera");
+  const modeRef = useRef<DeckMode>("camera");
+  modeRef.current = mode;
 
   const [nav, setNav] = useState<"IDLE" | "NAVIGATING" | "LOCKED">("IDLE");
   const [base, setBase] = useState<LayerId>("imagery");
@@ -84,12 +90,15 @@ export default function GodsEye({ active, accent, apiRef, onWeatherReport, onFoc
   const [quakes, setQuakes] = useState<Quake[]>([]);
   const [events, setEvents] = useState<NatEvent[]>([]);
   const [sats, setSats] = useState<SatPos[]>([]);
-  const [railOpen, setRailOpen] = useState(true);
-  const [activeFeed, setActiveFeed] = useState<string | null>(null);
+  const [drawer, setDrawer] = useState(false);
+  const [drawerTab, setDrawerTab] = useState<"wx" | "tel">("wx");
+  const [activeFeed, setActiveFeed] = useState<string>("f1");
   const [feedState, setFeedState] = useState<"idle" | "buffering" | "live" | "error">("idle");
-  const [link, setLink] = useState<"off" | "connecting" | "live">("off");
+  const [muted, setMuted] = useState(true);
+  const [clock, setClock] = useState("--:--:--");
   const [coords, setCoords] = useState({ lat: 18, lon: 8, zoom: 2.7 });
   const lastCoordPush = useRef(0);
+  const failCount = useRef(0);
 
   const reportArmed = useRef(false);
   const overlaysRef = useRef(overlays);
@@ -107,17 +116,24 @@ export default function GodsEye({ active, accent, apiRef, onWeatherReport, onFoc
   const navRef = useRef(nav);
   navRef.current = nav;
 
+  /* ---------- UTC clock ---------- */
+  useEffect(() => {
+    const tick = () => setClock(new Date().toISOString().slice(11, 19));
+    tick();
+    const iv = window.setInterval(tick, 1000);
+    return () => window.clearInterval(iv);
+  }, []);
+
   /* ---------- imperative API for the agent ---------- */
 
   const flyTo = useCallback((lat: number, lon: number, zoom: number, label?: string) => {
     const v = view.current;
     anim.current = { fLat: v.lat, fLon: v.lon, fZ: v.zoom, tLat: lat, tLon: lon, tZ: zoom, t0: performance.now(), dur: 1700, label };
     setNav("NAVIGATING");
+    setMode("map");
     if (label) setFocus({ label, lat, lon });
     reportArmed.current = true;
   }, []);
-
-
 
   /* ---------- weather on focus ---------- */
 
@@ -143,7 +159,7 @@ export default function GodsEye({ active, accent, apiRef, onWeatherReport, onFoc
     onFocusChange?.(focus);
   }, [focus, onFocusChange]);
 
-  /* ---------- live data polling ---------- */
+  /* ---------- live data polling (only while the deck is on screen) ---------- */
 
   useEffect(() => {
     if (!active) return;
@@ -199,7 +215,7 @@ export default function GodsEye({ active, accent, apiRef, onWeatherReport, onFoc
     return img;
   }, []);
 
-  /* ---------- canvas render loop ---------- */
+  /* ---------- canvas render loop (map mode) ---------- */
 
   useEffect(() => {
     const cv = canvasRef.current;
@@ -294,7 +310,7 @@ export default function GodsEye({ active, accent, apiRef, onWeatherReport, onFoc
 
     const draw = () => {
       raf = requestAnimationFrame(draw);
-      if (!active) return;
+      if (!active || modeRef.current !== "map") return;
 
       // animation
       if (anim.current) {
@@ -463,82 +479,91 @@ export default function GodsEye({ active, accent, apiRef, onWeatherReport, onFoc
     };
   }, [active, getTile]);
 
-  /* ---------- feeds (HLS) ---------- */
+  /* ---------- live feeds: broadcast HLS + local optics (getUserMedia) ---------- */
+
+  const hlsFeeds = FEEDS.filter((f) => f.id !== "cam");
 
   useEffect(() => {
     const video = feedVideoRef.current;
-    if (!video || !activeFeed) return;
+    if (!video || !active || mode !== "camera") return;
+
+    /* local camera — the barehands sensor link */
+    if (activeFeed === "cam") {
+      let stream: MediaStream | null = null;
+      setFeedState("buffering");
+      navigator.mediaDevices
+        ?.getUserMedia({ video: { width: 1280, height: 720 }, audio: false })
+        .then((s) => {
+          stream = s;
+          video.srcObject = s;
+          return video.play();
+        })
+        .then(() => {
+          setFeedState("live");
+          onLog?.("local optics link established");
+        })
+        .catch(() => setFeedState("error"));
+      return () => {
+        stream?.getTracks().forEach((t) => t.stop());
+        video.srcObject = null;
+      };
+    }
+
     const feed = FEEDS.find((f) => f.id === activeFeed);
     if (!feed) return;
     setFeedState("buffering");
     let hls: Hls | null = null;
+    let dead = false;
+
+    const advance = (reason: string) => {
+      if (dead) return;
+      failCount.current += 1;
+      if (failCount.current > hlsFeeds.length) {
+        setFeedState("error");
+        return;
+      }
+      const idx = hlsFeeds.findIndex((f) => f.id === activeFeed);
+      const next = hlsFeeds[(idx + 1) % hlsFeeds.length];
+      onLog?.(`feed ${feed.id} ${reason} — advancing to ${next.label}`);
+      setActiveFeed(next.id);
+    };
+
     if (Hls.isSupported()) {
-      hls = new Hls({ enableWorker: true });
+      hls = new Hls({ enableWorker: true, manifestLoadingTimeOut: 9000, levelLoadingTimeOut: 9000, fragLoadingTimeOut: 12000 });
       hls.loadSource(feed.src);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         void video.play().catch(() => undefined);
         setFeedState("live");
+        failCount.current = 0;
       });
       hls.on(Hls.Events.ERROR, (_e, data) => {
-        if (data.fatal) setFeedState("error");
+        if (data.fatal) {
+          hls?.destroy();
+          hls = null;
+          advance("signal lost");
+        }
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = feed.src;
-      void video.play().catch(() => undefined);
-      setFeedState("live");
+      video.onerror = () => advance("decode error");
+      void video
+        .play()
+        .then(() => {
+          setFeedState("live");
+          failCount.current = 0;
+        })
+        .catch(() => advance("playback refused"));
     } else {
       setFeedState("error");
     }
+
     return () => {
+      dead = true;
       if (hls) hls.destroy();
       video.removeAttribute("src");
     };
-  }, [activeFeed]);
-
-  /* ---------- WebRTC loopback link ---------- */
-
-  const pcs = useRef<RTCPeerConnection[]>([]);
-  const startLink = useCallback(async () => {
-    const cv = canvasRef.current;
-    const video = linkVideoRef.current;
-    if (!cv || !video || typeof RTCPeerConnection === "undefined") return;
-    setLink("connecting");
-    try {
-      const stream = (cv as HTMLCanvasElement & { captureStream: (fps: number) => MediaStream }).captureStream(30);
-      const a = new RTCPeerConnection();
-      const b = new RTCPeerConnection();
-      pcs.current = [a, b];
-      b.ontrack = (e) => {
-        video.srcObject = e.streams[0];
-        void video.play().catch(() => undefined);
-      };
-      b.oniceconnectionstatechange = () => {
-        if (b.iceConnectionState === "connected" || b.iceConnectionState === "completed") setLink("live");
-      };
-      stream.getTracks().forEach((tr) => a.addTrack(tr, stream));
-      a.onicecandidate = (e) => e.candidate && void b.addIceCandidate(e.candidate).catch(() => undefined);
-      b.onicecandidate = (e) => e.candidate && void a.addIceCandidate(e.candidate).catch(() => undefined);
-      const offer = await a.createOffer();
-      await a.setLocalDescription(offer);
-      await b.setRemoteDescription(offer);
-      const answer = await b.createAnswer();
-      await b.setLocalDescription(answer);
-      await a.setRemoteDescription(answer);
-      onLog?.("webrtc secure link engaged · DTLS-SRTP");
-    } catch {
-      setLink("off");
-    }
-  }, [onLog]);
-
-  const stopLink = useCallback(() => {
-    pcs.current.forEach((p) => p.close());
-    pcs.current = [];
-    if (linkVideoRef.current) linkVideoRef.current.srcObject = null;
-    setLink("off");
-  }, []);
-
-  useEffect(() => () => stopLink(), [stopLink]);
+  }, [activeFeed, active, mode, onLog, hlsFeeds]);
 
   /* ---------- imperative API for the agent ---------- */
 
@@ -547,14 +572,24 @@ export default function GodsEye({ active, accent, apiRef, onWeatherReport, onFoc
       flyTo,
       setBase: (id) => setBase(id),
       setOverlay: (id, on) => setOverlays((p) => ({ ...p, [id]: on })),
-      setFeed: (id) => setActiveFeed(id),
-      engageLink: () => void startLink(),
-      severLink: () => stopLink(),
+      setFeed: (id) => {
+        if (id) {
+          setActiveFeed(id);
+          setMode("camera");
+        }
+      },
+      engageLink: () => {
+        setActiveFeed("cam");
+        setMode("camera");
+      },
+      severLink: () => {
+        setActiveFeed("f1");
+      },
     };
     return () => {
       apiRef.current = null;
     };
-  }, [apiRef, flyTo, startLink, stopLink]);
+  }, [apiRef, flyTo]);
 
   /* ---------- UI ---------- */
 
@@ -562,332 +597,410 @@ export default function GodsEye({ active, accent, apiRef, onWeatherReport, onFoc
   const kmPerPx = (156543.03392 * Math.cos((coords.lat * Math.PI) / 180)) / Math.pow(2, coords.zoom) / 1000;
   const scaleKm = kmPerPx * 120;
   const scaleLabel = scaleKm >= 1 ? `${Math.round(scaleKm)} km` : `${Math.round(scaleKm * 1000)} m`;
+  const feed = FEEDS.find((f) => f.id === activeFeed) ?? FEEDS[0];
+
+  const selectFeed = (id: string) => {
+    failCount.current = 0;
+    setActiveFeed(id);
+  };
+
+  const nextFeed = () => {
+    const idx = hlsFeeds.findIndex((f) => f.id === activeFeed);
+    const next = hlsFeeds[(idx + 1) % hlsFeeds.length];
+    selectFeed(next.id);
+  };
 
   return (
-    <div ref={wrapRef} className="absolute inset-0 overflow-hidden">
-      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full cursor-grab active:cursor-grabbing" />
+    <div ref={wrapRef} className="absolute inset-0 overflow-hidden bg-ink-950">
+      {/* ============ MAP (mounted always — hidden behind the camera) ============ */}
+      <div className={`absolute inset-0 ${mode === "map" ? "" : "invisible"}`}>
+        <canvas ref={canvasRef} className="absolute inset-0 h-full w-full cursor-grab active:cursor-grabbing" />
 
-      {/* nav status chip */}
-      <div className="pointer-events-none absolute left-1/2 top-4 z-20 flex -translate-x-1/2 items-center gap-2 border bg-ink-950/80 px-3 py-1.5 backdrop-blur-sm" style={{ borderColor: alpha(accent, 0.5) }}>
-        <span className={`h-1.5 w-1.5 rounded-full ${nav === "NAVIGATING" ? "blink" : ""}`} style={{ background: nav === "LOCKED" ? "#9be15d" : nav === "NAVIGATING" ? accent : "#66868a" }} />
-        <span className="font-mono text-[9px] tracking-[0.26em]" style={{ color: nav === "IDLE" ? "#8cacac" : accent }}>
-          {nav === "NAVIGATING" ? "AGENT NAV · ACQUIRING TARGET" : nav === "LOCKED" ? `TARGET LOCKED · ${focus?.label.toUpperCase() ?? ""}` : "ORBITAL OBSERVATION · MANUAL"}
-        </span>
-      </div>
-
-      {/* right controls */}
-      <div className="absolute right-3 top-4 z-20 flex flex-col gap-1.5">
-        {[
-          { t: "+", fn: () => { view.current.zoom = Math.min(18, view.current.zoom + 0.8); }, a: "Zoom in" },
-          { t: "−", fn: () => { view.current.zoom = Math.max(2, view.current.zoom - 0.8); }, a: "Zoom out" },
-          { t: "⌂", fn: () => { anim.current = { fLat: view.current.lat, fLon: view.current.lon, fZ: view.current.zoom, tLat: 18, tLon: 8, tZ: 2.7, t0: performance.now(), dur: 1400 }; setNav("NAVIGATING"); }, a: "World view" },
-          { t: "◎", fn: () => { if (focusRef.current) flyTo(focusRef.current.lat, focusRef.current.lon, Math.max(view.current.zoom, 9), focusRef.current.label); }, a: "Re-center on focus" },
-        ].map((b) => (
-          <button
-            key={b.a}
-            onClick={b.fn}
-            aria-label={b.a}
-            className="flex h-8 w-8 items-center justify-center border bg-ink-950/80 font-mono text-[13px] text-mist-300 backdrop-blur-sm transition-all hover:-translate-y-px"
-            style={{ borderColor: "#213843" }}
-            onMouseEnter={(e) => (e.currentTarget.style.borderColor = accent)}
-            onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#213843")}
-          >
-            {b.t}
-          </button>
-        ))}
-        <button
-          onClick={() => setRailOpen((r) => !r)}
-          aria-label="Toggle data rail"
-          className="flex h-8 w-8 items-center justify-center border bg-ink-950/80 backdrop-blur-sm transition-all hover:-translate-y-px"
-          style={{ borderColor: railOpen ? accent : "#213843", color: railOpen ? accent : "#8cacac" }}
-        >
-          <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
-            <rect x="1.5" y="2" width="4" height="10" />
-            <path d="M8 3.5h4.5M8 7h4.5M8 10.5h4.5" />
-          </svg>
-        </button>
-      </div>
-
-      {/* base layer switcher */}
-      <div className="absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 border bg-ink-950/80 backdrop-blur-sm" style={{ borderColor: alpha(accent, 0.35) }}>
-        {(Object.keys(BASE_LAYERS) as LayerId[]).map((id) => {
-          const on = base === id;
-          return (
-            <button
-              key={id}
-              onClick={() => setBase(id)}
-              className="px-3 py-1.5 font-mono text-[9px] tracking-[0.2em] transition-colors"
-              style={{ color: on ? "#0b1317" : "#8cacac", background: on ? accent : "transparent", fontWeight: on ? 700 : 400 }}
-            >
-              {BASE_LAYERS[id].name}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* bottom-left: overlays + coords + scale */}
-      <div className={`absolute bottom-4 z-20 flex flex-col gap-1.5 transition-[left] duration-300 ${railOpen ? "left-[272px]" : "left-4"}`}>
-        <div className="flex gap-1">
-          {OVERLAY_DEFS.map((o) => {
-            const on = overlays[o.id];
-            return (
+        {/* layer chips — top-left, compact */}
+        <div className="absolute left-3 top-14 z-20 flex flex-col gap-1.5">
+          <div className="flex gap-1">
+            {(Object.keys(BASE_LAYERS) as LayerId[]).map((id) => (
               <button
-                key={o.id}
-                onClick={() => setOverlays((p) => ({ ...p, [o.id]: !p[o.id] }))}
-                className="border px-2 py-1 font-mono text-[8px] tracking-[0.18em] transition-all hover:-translate-y-px"
+                key={id}
+                onClick={() => setBase(id)}
+                className="border px-2 py-1 font-mono text-[8px] tracking-[0.16em] transition-all hover:-translate-y-px"
                 style={{
-                  borderColor: on ? alpha(accent, 0.65) : "#213843",
-                  color: on ? accent : "#66868a",
-                  background: on ? alpha(accent, 0.1) : "rgba(11,19,23,0.8)",
+                  borderColor: base === id ? alpha(accent, 0.7) : "#213843",
+                  color: base === id ? "#0b1317" : "#8cacac",
+                  background: base === id ? accent : "rgba(11,19,23,0.82)",
+                  fontWeight: base === id ? 700 : 400,
                 }}
               >
-                {o.label}
+                {BASE_LAYERS[id].name}
               </button>
-            );
-          })}
+            ))}
+          </div>
+          <div className="flex gap-1">
+            {OVERLAY_DEFS.map((o) => {
+              const on = overlays[o.id];
+              return (
+                <button
+                  key={o.id}
+                  onClick={() => setOverlays((p) => ({ ...p, [o.id]: !p[o.id] }))}
+                  className="border px-2 py-1 font-mono text-[8px] tracking-[0.16em] transition-all hover:-translate-y-px"
+                  style={{
+                    borderColor: on ? alpha(accent, 0.65) : "#213843",
+                    color: on ? accent : "#66868a",
+                    background: on ? alpha(accent, 0.1) : "rgba(11,19,23,0.82)",
+                  }}
+                >
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
-        <div className="flex items-center gap-3 border bg-ink-950/80 px-2.5 py-1.5 backdrop-blur-sm" style={{ borderColor: "#213843" }}>
-          <span className="font-mono text-[9px] tracking-[0.14em] text-mist-300">{fmtCoord(coords.lat, coords.lon)}</span>
-          <span className="font-mono text-[9px] text-mist-600">Z{coords.zoom.toFixed(1)}</span>
-          <span className="flex items-center gap-1">
-            <span className="h-px w-[60px]" style={{ background: "#8cacac" }} />
-            <span className="font-mono text-[8px] text-mist-500">{scaleLabel}</span>
-          </span>
+
+        {/* zoom column — right side, above the core PIP */}
+        <div className="absolute right-3 top-14 z-20 flex flex-col gap-1.5">
+          {[
+            { t: "+", fn: () => { view.current.zoom = Math.min(18, view.current.zoom + 0.8); }, a: "Zoom in" },
+            { t: "−", fn: () => { view.current.zoom = Math.max(2, view.current.zoom - 0.8); }, a: "Zoom out" },
+            { t: "⌂", fn: () => { anim.current = { fLat: view.current.lat, fLon: view.current.lon, fZ: view.current.zoom, tLat: 18, tLon: 8, tZ: 2.7, t0: performance.now(), dur: 1400 }; setNav("NAVIGATING"); }, a: "World view" },
+            { t: "◎", fn: () => { if (focusRef.current) flyTo(focusRef.current.lat, focusRef.current.lon, Math.max(view.current.zoom, 9), focusRef.current.label); }, a: "Re-center on focus" },
+          ].map((b) => (
+            <button
+              key={b.a}
+              onClick={b.fn}
+              aria-label={b.a}
+              className="flex h-8 w-8 items-center justify-center border bg-ink-950/82 font-mono text-[13px] text-mist-300 backdrop-blur-sm transition-all hover:-translate-y-px"
+              style={{ borderColor: "#213843" }}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = accent)}
+              onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#213843")}
+            >
+              {b.t}
+            </button>
+          ))}
         </div>
-        <p className="font-mono text-[7px] tracking-[0.1em] text-mist-600">{layer.attribution}</p>
+
+        {/* coords + scale + attribution — bottom-left */}
+        <div className="absolute bottom-[88px] left-3 z-20 flex flex-col gap-1 lg:bottom-4">
+          <div className="flex items-center gap-3 border bg-ink-950/82 px-2.5 py-1.5 backdrop-blur-sm" style={{ borderColor: "#213843" }}>
+            <span className="font-mono text-[9px] tracking-[0.14em] text-mist-300">{fmtCoord(coords.lat, coords.lon)}</span>
+            <span className="font-mono text-[9px] text-mist-600">Z{coords.zoom.toFixed(1)}</span>
+            <span className="flex items-center gap-1">
+              <span className="h-px w-[60px]" style={{ background: "#8cacac" }} />
+              <span className="font-mono text-[8px] text-mist-500">{scaleLabel}</span>
+            </span>
+          </div>
+          <p className="pl-0.5 font-mono text-[7px] tracking-[0.1em] text-mist-600">{layer.attribution}</p>
+        </div>
       </div>
 
-      {/* ============ DATA RAIL ============ */}
-      {railOpen && (
-        <div className="absolute bottom-3 left-3 top-14 z-10 flex w-[254px] flex-col gap-2 overflow-y-auto pr-1">
-          {/* FOCUS / WEATHER */}
-          <div className="panel p-3">
-            <p className="pb-1.5 font-mono text-[8px] tracking-[0.26em] text-mist-600">FOCUS · LIVE TELEMETRY</p>
-            {focus ? (
-              <>
-                <p className="font-display text-[17px] font-bold leading-tight tracking-[0.06em]" style={{ color: accent }}>
-                  {focus.label.toUpperCase()}
-                </p>
-                <p className="mb-2 font-mono text-[8px] tracking-[0.12em] text-mist-500">{fmtCoord(focus.lat, focus.lon)}</p>
-                {weather ? (
-                  <>
-                    <div className="flex items-end justify-between">
-                      <span className="font-display text-[34px] font-extrabold leading-none text-mist-100">
-                        {Math.round(weather.temp)}°<span className="text-[15px] text-mist-500">C</span>
-                      </span>
-                      <span className="pb-1 text-right">
-                        <span className="block font-mono text-[9px] tracking-[0.14em]" style={{ color: accent }}>
-                          {weather.label.toUpperCase()}
+      {/* ============ CAMERA — the default face of the deck ============ */}
+      {mode === "camera" && (
+        <div className="absolute inset-0 bg-ink-950">
+          <video ref={feedVideoRef} muted={muted} autoPlay playsInline className="absolute inset-0 h-full w-full object-cover" />
+          <div className="scan-layer pointer-events-none absolute inset-0" />
+          <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(ellipse at center, transparent 55%, rgba(11,19,23,0.55) 100%)" }} />
+
+          {/* source plate — top-left under the strip */}
+          <div className="absolute left-3 top-14 z-20 border bg-ink-950/82 px-3 py-2 backdrop-blur-sm" style={{ borderColor: alpha(accent, 0.45) }}>
+            <div className="flex items-center gap-2">
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${feedState === "live" ? "blink" : ""}`}
+                style={{ background: feedState === "live" ? "#ff5d5d" : feedState === "buffering" ? accent : "#66868a" }}
+              />
+              <span className="font-mono text-[10px] font-bold tracking-[0.24em]" style={{ color: feedState === "live" ? "#eaf4f3" : "#8cacac" }}>
+                {feedState === "live" ? "LIVE" : feedState === "buffering" ? "ACQUIRING" : feedState === "error" ? "NO SIGNAL" : "STANDBY"}
+              </span>
+            </div>
+            <p className="mt-1 font-mono text-[9px] tracking-[0.14em]" style={{ color: accent }}>
+              {feed.label}
+            </p>
+            <p className="font-mono text-[7.5px] tracking-[0.1em] text-mist-600">{feed.loc.toUpperCase()}</p>
+          </div>
+
+          {/* buffering / error states */}
+          {feedState === "buffering" && (
+            <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-ink-950/70">
+              <div className="h-7 w-7 animate-spin rounded-full border-2 border-t-transparent" style={{ borderColor: alpha(accent, 0.6), borderTopColor: "transparent" }} />
+              <p className="font-mono text-[9px] tracking-[0.3em] text-mist-500">ACQUIRING SIGNAL…</p>
+            </div>
+          )}
+          {feedState === "error" && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-ink-950/85">
+              <p className="font-mono text-[10px] tracking-[0.3em] text-ember">
+                {activeFeed === "cam" ? "CAMERA ACCESS DENIED" : "ALL SOURCES DARK"}
+              </p>
+              <p className="max-w-[380px] text-center font-mono text-[8px] leading-relaxed tracking-[0.14em] text-mist-500">
+                {activeFeed === "cam"
+                  ? "ALLOW WEBCAM ACCESS IN THE ADDRESS BAR TO OPEN THE LOCAL OPTICS LINK — OR SWITCH TO A BROADCAST SOURCE BELOW."
+                  : "EVERY BROADCAST SOURCE FAILED TO ANSWER. CHECK NETWORK ACCESS, THEN RETRY OR SWITCH SOURCES."}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    failCount.current = 0;
+                    setActiveFeed(activeFeed);
+                    setFeedState("buffering");
+                  }}
+                  className="border px-3 py-1.5 font-mono text-[9px] tracking-[0.2em] transition-all hover:-translate-y-px"
+                  style={{ borderColor: alpha(accent, 0.6), color: accent }}
+                >
+                  RETRY
+                </button>
+                {activeFeed === "cam" ? (
+                  <button
+                    onClick={() => selectFeed("f1")}
+                    className="border border-ink-600 px-3 py-1.5 font-mono text-[9px] tracking-[0.2em] text-mist-300 transition-all hover:-translate-y-px"
+                  >
+                    BROADCAST →
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => selectFeed("cam")}
+                    className="border border-ink-600 px-3 py-1.5 font-mono text-[9px] tracking-[0.2em] text-mist-300 transition-all hover:-translate-y-px"
+                  >
+                    LOCAL CAM →
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* transport — bottom-left (right side stays clear for the core PIP) */}
+          <div className="absolute bottom-[88px] left-3 z-20 flex max-w-[calc(100%-24px)] flex-col gap-1.5 lg:bottom-4 lg:max-w-[calc(100%-380px)]">
+            <div className="flex gap-1">
+              <button
+                onClick={() => setMuted((m) => !m)}
+                className="border bg-ink-950/82 px-2.5 py-1 font-mono text-[8px] tracking-[0.18em] backdrop-blur-sm transition-all hover:-translate-y-px"
+                style={{ borderColor: muted ? "#213843" : alpha(accent, 0.6), color: muted ? "#66868a" : accent }}
+              >
+                {muted ? "UNMUTE" : "MUTE"}
+              </button>
+              <button
+                onClick={nextFeed}
+                className="border border-ink-600 bg-ink-950/82 px-2.5 py-1 font-mono text-[8px] tracking-[0.18em] text-mist-300 backdrop-blur-sm transition-all hover:-translate-y-px"
+              >
+                NEXT SOURCE →
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {FEEDS.map((f) => {
+                const on = f.id === activeFeed;
+                return (
+                  <button
+                    key={f.id}
+                    onClick={() => selectFeed(f.id)}
+                    className="border px-2 py-1 font-mono text-[8px] tracking-[0.12em] transition-all hover:-translate-y-px"
+                    style={{
+                      borderColor: on ? alpha(accent, 0.7) : "#213843",
+                      color: on ? "#0b1317" : "#8cacac",
+                      background: on ? accent : "rgba(11,19,23,0.82)",
+                      fontWeight: on ? 700 : 400,
+                    }}
+                  >
+                    {f.id === "cam" ? "◉ LOCAL" : f.label.split("·")[0].trim()}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============ TOP STRIP ============ */}
+      <div className="absolute inset-x-0 top-0 z-30 flex h-11 items-center justify-between bg-gradient-to-b from-ink-950/95 via-ink-950/70 to-transparent px-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex border" style={{ borderColor: alpha(accent, 0.45) }}>
+            {(["camera", "map"] as DeckMode[]).map((m) => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                className="px-3 py-1 font-mono text-[9px] tracking-[0.22em] transition-colors"
+                style={{
+                  background: mode === m ? accent : "rgba(11,19,23,0.6)",
+                  color: mode === m ? "#0b1317" : "#8cacac",
+                  fontWeight: mode === m ? 700 : 400,
+                }}
+              >
+                {m === "camera" ? "CAMERA" : "MAP"}
+              </button>
+            ))}
+          </div>
+          <div className="hidden min-w-0 items-center gap-2 md:flex">
+            <span
+              className={`h-1.5 w-1.5 shrink-0 rounded-full ${nav === "NAVIGATING" ? "blink" : ""}`}
+              style={{ background: nav === "LOCKED" ? "#9be15d" : nav === "NAVIGATING" ? accent : "#66868a" }}
+            />
+            <span className="truncate font-mono text-[9px] tracking-[0.22em]" style={{ color: nav === "IDLE" ? "#8cacac" : accent }}>
+              {nav === "NAVIGATING"
+                ? "ACQUIRING TARGET"
+                : nav === "LOCKED"
+                ? `LOCKED · ${focus?.label.toUpperCase() ?? ""}`
+                : focus
+                ? `FOCUS · ${focus.label.toUpperCase()}`
+                : "GLOBAL OBSERVATION"}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="font-mono text-[9px] tracking-[0.2em] text-mist-500">{clock} UTC</span>
+          <button
+            onClick={() => setDrawer((d) => !d)}
+            className="flex items-center gap-1.5 border px-2.5 py-1 font-mono text-[8px] tracking-[0.2em] transition-all hover:-translate-y-px"
+            style={{
+              borderColor: drawer ? alpha(accent, 0.7) : "#213843",
+              color: drawer ? accent : "#8cacac",
+              background: drawer ? alpha(accent, 0.1) : "rgba(11,19,23,0.7)",
+            }}
+          >
+            <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
+              <rect x="1.5" y="2" width="4" height="10" />
+              <path d="M8 3.5h4.5M8 7h4.5M8 10.5h4.5" />
+            </svg>
+            TELEMETRY
+          </button>
+        </div>
+      </div>
+
+      {/* ============ TELEMETRY DRAWER (respects the core PIP zone) ============ */}
+      {drawer && (
+        <div className="absolute bottom-[96px] right-0 top-11 z-20 flex w-[252px] max-w-[82vw] flex-col border-l bg-ink-900/95 backdrop-blur-sm lg:bottom-[268px]" style={{ borderColor: alpha(accent, 0.3) }}>
+          <div className="flex border-b border-ink-700/70">
+            {([["wx", "WEATHER"], ["tel", "TELEMETRY"]] as ["wx" | "tel", string][]).map(([id, label]) => (
+              <button
+                key={id}
+                onClick={() => setDrawerTab(id)}
+                className="flex-1 py-1.5 font-mono text-[8px] tracking-[0.22em] transition-colors"
+                style={{
+                  color: drawerTab === id ? accent : "#66868a",
+                  background: drawerTab === id ? alpha(accent, 0.08) : "transparent",
+                  borderBottom: drawerTab === id ? `2px solid ${accent}` : "2px solid transparent",
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
+            {drawerTab === "wx" ? (
+              focus ? (
+                <>
+                  <p className="font-display text-[15px] font-bold leading-tight tracking-[0.06em]" style={{ color: accent }}>
+                    {focus.label.toUpperCase()}
+                  </p>
+                  <p className="mb-2 font-mono text-[7.5px] tracking-[0.12em] text-mist-500">{fmtCoord(focus.lat, focus.lon)}</p>
+                  {weather ? (
+                    <>
+                      <div className="flex items-end justify-between">
+                        <span className="font-display text-[30px] font-extrabold leading-none text-mist-100">
+                          {Math.round(weather.temp)}°<span className="text-[13px] text-mist-500">C</span>
                         </span>
-                        <span className="block font-mono text-[8px] text-mist-600">{weather.isDay ? "DAYLIGHT" : "NIGHT"}</span>
-                      </span>
-                    </div>
-                    <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 font-mono text-[9px]">
-                      {[
-                        ["FEELS", `${Math.round(weather.feels)}°C`],
-                        ["WIND", `${Math.round(weather.wind)} km/h ${windDirName(weather.windDir)}`],
-                        ["HUMIDITY", `${weather.humidity}%`],
-                        ["PRESSURE", `${Math.round(weather.pressure)} hPa`],
-                        ["CLOUD", `${weather.cloud}%`],
-                        ["PRECIP", `${weather.precip} mm`],
-                        ["SUNRISE", weather.sunrise || "—"],
-                        ["SUNSET", weather.sunset || "—"],
-                      ].map(([k, v]) => (
-                        <div key={k} className="flex justify-between border-b border-ink-700/50 py-0.5">
-                          <span className="text-mist-600">{k}</span>
-                          <span className="text-mist-300">{v}</span>
-                        </div>
-                      ))}
-                    </div>
-                    {air && (
-                      <div className="mt-2 flex items-center justify-between border px-2 py-1" style={{ borderColor: alpha(aqiColor(air.label), 0.5) }}>
-                        <span className="font-mono text-[8px] tracking-[0.2em] text-mist-500">AIR QUALITY</span>
-                        <span className="font-mono text-[10px] font-bold" style={{ color: aqiColor(air.label) }}>
-                          {air.aqi} · {air.label}
+                        <span className="pb-1 text-right">
+                          <span className="block font-mono text-[8.5px] tracking-[0.14em]" style={{ color: accent }}>
+                            {weather.label.toUpperCase()}
+                          </span>
+                          <span className="block font-mono text-[7.5px] text-mist-600">{weather.isDay ? "DAYLIGHT" : "NIGHT"}</span>
                         </span>
                       </div>
-                    )}
-                  </>
-                ) : (
-                  <p className="py-3 font-mono text-[9px] tracking-[0.14em] text-mist-600">
-                    {wxLoading ? "POLLING SATELLITES…" : "TELEMETRY UNAVAILABLE"}
-                  </p>
-                )}
-                <button
-                  onClick={() => void refreshWeather()}
-                  className="mt-2 w-full border border-ink-600 py-1 font-mono text-[8px] tracking-[0.2em] text-mist-500 transition-colors hover:text-mist-100"
-                  style={{ borderColor: "#213843" }}
-                >
-                  REFRESH TELEMETRY
-                </button>
-              </>
-            ) : (
-              <p className="py-2 font-mono text-[9px] leading-relaxed tracking-[0.1em] text-mist-600">
-                NO FOCUS — TELL THE AGENT “FLY TO TOKYO” OR “WEATHER IN REYKJAVÍK”
-              </p>
-            )}
-          </div>
-
-          {/* SATELLITES */}
-          <div className="panel p-3">
-            <p className="pb-1.5 font-mono text-[8px] tracking-[0.26em] text-mist-600">ORBITAL ASSETS · LIVE</p>
-            {sats.length === 0 ? (
-              <p className="py-1 font-mono text-[9px] text-mist-600">ACQUIRING DOWNLINK…</p>
-            ) : (
-              <div className="space-y-1">
-                {sats.map((s) => (
+                      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-0.5 font-mono text-[8.5px]">
+                        {[
+                          ["FEELS", `${Math.round(weather.feels)}°C`],
+                          ["WIND", `${Math.round(weather.wind)} ${windDirName(weather.windDir)}`],
+                          ["HUMIDITY", `${weather.humidity}%`],
+                          ["PRESSURE", `${Math.round(weather.pressure)}`],
+                          ["CLOUD", `${weather.cloud}%`],
+                          ["PRECIP", `${weather.precip}mm`],
+                          ["SUNRISE", weather.sunrise || "—"],
+                          ["SUNSET", weather.sunset || "—"],
+                        ].map(([k, v]) => (
+                          <div key={k} className="flex justify-between border-b border-ink-700/50 py-0.5">
+                            <span className="text-mist-600">{k}</span>
+                            <span className="text-mist-300">{v}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {air && (
+                        <div className="mt-2 flex items-center justify-between border px-2 py-1" style={{ borderColor: alpha(aqiColor(air.label), 0.5) }}>
+                          <span className="font-mono text-[7.5px] tracking-[0.2em] text-mist-500">AIR</span>
+                          <span className="font-mono text-[9px] font-bold" style={{ color: aqiColor(air.label) }}>
+                            {air.aqi} · {air.label}
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="py-3 font-mono text-[8.5px] tracking-[0.14em] text-mist-600">
+                      {wxLoading ? "POLLING SATELLITES…" : "TELEMETRY UNAVAILABLE"}
+                    </p>
+                  )}
                   <button
-                    key={s.id}
-                    onClick={() => flyTo(s.lat, s.lon, 5, s.name)}
-                    className="flex w-full items-center justify-between border border-ink-700/60 bg-ink-850/50 px-2 py-1.5 text-left transition-all hover:-translate-y-px hover:border-mist-600"
+                    onClick={() => void refreshWeather()}
+                    className="mt-2 w-full border border-ink-600 py-1 font-mono text-[8px] tracking-[0.2em] text-mist-500 transition-colors hover:text-mist-100"
                   >
-                    <span className="flex items-center gap-1.5">
-                      <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden>
-                        <path d="M4 0 8 7H0z" fill={s.color} />
-                      </svg>
-                      <span className="font-mono text-[9px] font-bold tracking-[0.14em] text-mist-300">{s.name}</span>
-                    </span>
-                    <span className="font-mono text-[8px] text-mist-500">
-                      {Math.round(s.alt)} km · {Math.round(s.vel)} km/h
-                    </span>
+                    REFRESH
                   </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* SEISMIC */}
-          <div className="panel p-3">
-            <p className="pb-1.5 font-mono text-[8px] tracking-[0.26em] text-mist-600">
-              SEISMIC · M2.5+ PAST HOUR <span className="text-mist-500">({quakes.length})</span>
-            </p>
-            {quakes.length === 0 ? (
-              <p className="py-1 font-mono text-[9px] text-mist-600">QUIET HOUR — USGS FEED LIVE</p>
+                </>
+              ) : (
+                <p className="py-4 text-center font-mono text-[8.5px] leading-relaxed tracking-[0.14em] text-mist-600">
+                  NO FOCUS SET.
+                  <br />
+                  SAY “FLY TO TOKYO” OR CLICK THE MAP.
+                </p>
+              )
             ) : (
-              <div className="space-y-1">
-                {quakes.slice(0, 5).map((q) => (
-                  <button
-                    key={q.id}
-                    onClick={() => flyTo(q.lat, q.lon, 6.5, `M${q.mag.toFixed(1)}`)}
-                    className="flex w-full items-center gap-2 border border-ink-700/60 bg-ink-850/50 px-2 py-1.5 text-left transition-all hover:-translate-y-px hover:border-mist-600"
-                  >
-                    <span
-                      className="flex h-6 w-8 shrink-0 items-center justify-center font-mono text-[10px] font-bold"
-                      style={{ background: alpha(magColor(q.mag), 0.18), color: magColor(q.mag) }}
+              <>
+                <p className="pb-1 font-mono text-[7.5px] tracking-[0.24em] text-mist-600">SEISMIC · M4.5+ · USGS</p>
+                <div className="mb-2.5 space-y-1">
+                  {(quakes.length ? [...quakes].sort((a, b) => b.mag - a.mag).slice(0, 5) : []).map((q) => (
+                    <button
+                      key={q.id}
+                      onClick={() => flyTo(q.lat, q.lon, 6.5, q.place.split(",").slice(-2)[0]?.trim() || "Quake")}
+                      className="flex w-full items-center gap-2 border border-ink-700/60 px-2 py-1 text-left transition-all hover:-translate-y-px hover:border-mist-600"
                     >
-                      {q.mag.toFixed(1)}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-mono text-[8.5px] text-mist-300">{q.place}</span>
-                      <span className="block font-mono text-[7.5px] text-mist-600">{ago(q.time)} · {Math.round(q.depth)} km deep</span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* EVENTS */}
-          <div className="panel p-3">
-            <p className="pb-1.5 font-mono text-[8px] tracking-[0.26em] text-mist-600">
-              OPEN EVENTS · NASA EONET <span className="text-mist-500">({events.length})</span>
-            </p>
-            {events.length === 0 ? (
-              <p className="py-1 font-mono text-[9px] text-mist-600">AWAITING EONET FEED…</p>
-            ) : (
-              <div className="space-y-1">
-                {events.slice(0, 6).map((ev) => (
-                  <button
-                    key={ev.id}
-                    onClick={() => flyTo(ev.lat, ev.lon, 6, ev.title.split(" ").slice(0, 2).join(" "))}
-                    className="flex w-full items-center gap-2 border border-ink-700/60 bg-ink-850/50 px-2 py-1.5 text-left transition-all hover:-translate-y-px hover:border-mist-600"
-                  >
-                    <span className="h-2 w-2 shrink-0 rotate-45" style={{ background: eventColor(ev.category) }} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-mono text-[8.5px] text-mist-300">{ev.title}</span>
-                      <span className="block font-mono text-[7.5px] uppercase tracking-[0.1em]" style={{ color: eventColor(ev.category) }}>
-                        {ev.category} · {ev.date}
+                      <span className="font-mono text-[10px] font-bold" style={{ color: magColor(q.mag) }}>
+                        {q.mag.toFixed(1)}
                       </span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+                      <span className="min-w-0 flex-1 truncate font-mono text-[8px] text-mist-300">{q.place}</span>
+                      <span className="shrink-0 font-mono text-[7px] text-mist-600">{ago(q.time)}</span>
+                    </button>
+                  ))}
+                  {!quakes.length && <p className="font-mono text-[8px] text-mist-600">POLLING…</p>}
+                </div>
 
-          {/* LINKED FEEDS */}
-          <div className="panel p-3">
-            <p className="pb-1.5 font-mono text-[8px] tracking-[0.26em] text-mist-600">LINKED FEEDS · HLS</p>
-            {activeFeed && (
-              <div className="relative mb-2 aspect-video w-full overflow-hidden border" style={{ borderColor: alpha(accent, 0.4) }}>
-                <video ref={feedVideoRef} muted playsInline className="h-full w-full bg-black object-cover" />
-                <span
-                  className="absolute left-1.5 top-1.5 flex items-center gap-1 px-1.5 py-0.5 font-mono text-[7.5px] tracking-[0.2em]"
-                  style={{ background: "rgba(11,19,23,0.85)", color: feedState === "live" ? "#ff5d5d" : "#f5b94b" }}
-                >
-                  <span className={`h-1.5 w-1.5 rounded-full ${feedState === "live" ? "blink" : ""}`} style={{ background: feedState === "live" ? "#ff5d5d" : "#f5b94b" }} />
-                  {feedState === "live" ? "LIVE" : feedState === "buffering" ? "BUFFERING" : "SIGNAL LOST"}
-                </span>
-                <button
-                  onClick={() => setActiveFeed(null)}
-                  className="absolute right-1.5 top-1.5 border border-ink-600 bg-ink-950/85 px-1.5 py-0.5 font-mono text-[7.5px] text-mist-400 hover:text-mist-100"
-                >
-                  CUT
-                </button>
-              </div>
-            )}
-            <div className="space-y-1">
-              {FEEDS.map((f) => (
-                <button
-                  key={f.id}
-                  onClick={() => setActiveFeed(f.id)}
-                  className="flex w-full items-center justify-between border border-ink-700/60 bg-ink-850/50 px-2 py-1.5 text-left transition-all hover:-translate-y-px hover:border-mist-600"
-                  style={activeFeed === f.id ? { borderColor: alpha(accent, 0.7) } : undefined}
-                >
-                  <span className="font-mono text-[8.5px] tracking-[0.12em] text-mist-300">{f.label}</span>
-                  <span className="font-mono text-[7.5px] text-mist-600">{activeFeed === f.id ? "ON MONITOR" : "STANDBY"}</span>
-                </button>
-              ))}
-            </div>
-            <p className="mt-1.5 font-mono text-[7px] leading-relaxed text-mist-600">PUBLIC DEMO STREAMS — POINT THE AGENT AT YOUR OWN HLS / WEBRTC ENDPOINTS.</p>
-          </div>
+                <p className="pb-1 font-mono text-[7.5px] tracking-[0.24em] text-mist-600">ORBITAL ASSETS</p>
+                <div className="mb-2.5 space-y-1">
+                  {sats.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => flyTo(s.lat, s.lon, 5, s.name)}
+                      className="flex w-full items-center gap-2 border border-ink-700/60 px-2 py-1 text-left transition-all hover:-translate-y-px hover:border-mist-600"
+                    >
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: s.color }} />
+                      <span className="font-mono text-[8.5px] font-bold text-mist-100">{s.name}</span>
+                      <span className="min-w-0 flex-1 truncate text-right font-mono text-[7.5px] text-mist-500">
+                        {Math.round(s.alt)}km · {fmtCoord(s.lat, s.lon)}
+                      </span>
+                    </button>
+                  ))}
+                  {!sats.length && <p className="font-mono text-[8px] text-mist-600">TRACKING…</p>}
+                </div>
 
-          {/* WEBRTC SECURE LINK */}
-          <div className="panel p-3">
-            <p className="pb-1.5 font-mono text-[8px] tracking-[0.26em] text-mist-600">SECURE LINK · WEBRTC</p>
-            {link !== "off" && (
-              <div className="relative mb-2 aspect-video w-full overflow-hidden border" style={{ borderColor: link === "live" ? "rgba(155,225,93,0.5)" : "#213843" }}>
-                <video ref={linkVideoRef} muted playsInline className="h-full w-full bg-black object-cover" />
-                <span
-                  className="absolute left-1.5 top-1.5 flex items-center gap-1 px-1.5 py-0.5 font-mono text-[7.5px] tracking-[0.18em]"
-                  style={{ background: "rgba(11,19,23,0.85)", color: link === "live" ? "#9be15d" : "#f5b94b" }}
-                >
-                  <span className="pulse-dot h-1.5 w-1.5 rounded-full" style={{ background: link === "live" ? "#9be15d" : "#f5b94b" }} />
-                  {link === "live" ? "PEER CONNECTED" : "NEGOTIATING…"}
-                </span>
-              </div>
+                <p className="pb-1 font-mono text-[7.5px] tracking-[0.24em] text-mist-600">NATURAL EVENTS · EONET</p>
+                <div className="space-y-1">
+                  {events.slice(0, 5).map((ev) => (
+                    <button
+                      key={ev.id}
+                      onClick={() => flyTo(ev.lat, ev.lon, 6, ev.title.slice(0, 24))}
+                      className="flex w-full items-center gap-2 border border-ink-700/60 px-2 py-1 text-left transition-all hover:-translate-y-px hover:border-mist-600"
+                    >
+                      <span className="h-1.5 w-1.5 shrink-0 rotate-45" style={{ background: eventColor(ev.category) }} />
+                      <span className="min-w-0 flex-1 truncate font-mono text-[8px] text-mist-300">{ev.title}</span>
+                    </button>
+                  ))}
+                  {!events.length && <p className="font-mono text-[8px] text-mist-600">SCANNING…</p>}
+                </div>
+              </>
             )}
-            {link === "off" ? (
-              <button
-                onClick={() => void startLink()}
-                className="w-full border py-1.5 font-mono text-[9px] font-bold tracking-[0.22em] transition-all hover:-translate-y-px"
-                style={{ borderColor: alpha(accent, 0.6), color: accent, background: alpha(accent, 0.08) }}
-              >
-                ENGAGE LINK
-              </button>
-            ) : (
-              <button
-                onClick={stopLink}
-                className="w-full border border-ember/60 py-1.5 font-mono text-[9px] font-bold tracking-[0.22em] text-ember transition-all hover:-translate-y-px"
-              >
-                SEVER LINK
-              </button>
-            )}
-            <p className="mt-1.5 font-mono text-[7px] leading-relaxed text-mist-600">
-              {link === "live"
-                ? "DTLS-SRTP ENCRYPTED · MAP CANVAS STREAMING OVER A REAL RTCPeerConnection."
-                : "PIPES THIS OBSERVATION DECK THROUGH AN ENCRYPTED PEER CONNECTION TO A LOCAL MONITOR."}
-            </p>
           </div>
         </div>
       )}

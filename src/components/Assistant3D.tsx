@@ -7,11 +7,102 @@ import type { Mood, Persona } from "../lib/personas";
 import { alpha } from "../lib/personas";
 import { engine } from "../lib/musicEngine";
 import { kernelNum } from "../lib/kernel";
+import { profileFinish } from "../lib/taste";
 import type { HandFrame } from "../lib/hands";
 import type { PinnedImage, SceneObject, ShapeKind } from "../lib/sceneTypes";
 
 export interface BeatRef {
   current: { at: number; accent: boolean };
+}
+
+/** frame heartbeat — the viewport polls this to prove the renderer is alive */
+export const coreHeart = { frames: 0 };
+
+/* ---------- living CPU avatar (fallback when GPU/WebGL is unavailable) ---------- */
+
+export function FallbackCore({
+  accent,
+  mood,
+  note,
+  onReboot,
+}: {
+  accent: string;
+  mood: Mood;
+  note: string;
+  onReboot?: () => void;
+}) {
+  const speed = mood === "thinking" ? 0.3 : mood === "djing" ? 0.45 : 1;
+  return (
+    <div
+      className="absolute inset-0 flex flex-col items-center justify-center gap-4"
+      style={{ background: "radial-gradient(ellipse 70% 60% at 50% 45%, rgba(24,43,52,0.9), rgba(11,19,23,0.97))" }}
+    >
+      <svg
+        width="min(62%,300px)"
+        viewBox="0 0 300 300"
+        className="overflow-visible"
+        style={{ ["--fc-speed" as string]: speed }}
+        aria-label="Assistant core (CPU avatar)"
+      >
+        <defs>
+          <radialGradient id="fcCore" cx="50%" cy="42%" r="60%">
+            <stop offset="0%" stopColor="#eaf4f3" stopOpacity="0.95" />
+            <stop offset="34%" stopColor={accent} stopOpacity="0.9" />
+            <stop offset="100%" stopColor={accent} stopOpacity="0.08" />
+          </radialGradient>
+          <radialGradient id="fcHalo" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor={accent} stopOpacity="0.35" />
+            <stop offset="100%" stopColor={accent} stopOpacity="0" />
+          </radialGradient>
+        </defs>
+
+        <circle cx="150" cy="150" r="120" fill="url(#fcHalo)" className="fc-halo" />
+
+        <g className="fc-spin-rev">
+          <circle cx="150" cy="150" r="118" fill="none" stroke={accent} strokeOpacity="0.35" strokeWidth="1" strokeDasharray="42 26" />
+        </g>
+        <g className="fc-spin">
+          <circle cx="150" cy="150" r="93" fill="none" stroke={accent} strokeOpacity="0.7" strokeWidth="1.4" strokeDasharray="3 13" />
+        </g>
+
+        <g className="fc-orbit">
+          {[0, 72, 144, 216, 288].map((deg) => (
+            <g key={deg} transform={`rotate(${deg} 150 150)`}>
+              <rect x="146.5" y="53" width="7" height="7" transform="rotate(45 150 56.5)" fill={accent} opacity="0.85" />
+            </g>
+          ))}
+        </g>
+
+        <polygon
+          points="150,106 188,128 188,172 150,194 112,172 112,128"
+          fill="none"
+          stroke="#eaf4f3"
+          strokeOpacity="0.14"
+          strokeWidth="1"
+        />
+
+        <g className="fc-breathe">
+          <circle cx="150" cy="150" r="52" fill="url(#fcCore)" />
+          <circle cx="150" cy="150" r="52" fill="none" stroke="#eaf4f3" strokeOpacity="0.35" strokeWidth="1" />
+        </g>
+      </svg>
+
+      <div className="flex flex-col items-center gap-2 px-6 text-center">
+        <p className="font-mono text-[8px] tracking-[0.26em]" style={{ color: accent }}>
+          {note}
+        </p>
+        {onReboot && (
+          <button
+            onClick={onReboot}
+            className="border px-3 py-1.5 font-mono text-[8px] tracking-[0.2em] transition-all hover:-translate-y-0.5"
+            style={{ borderColor: `${accent}77`, color: accent, background: "rgba(11,19,23,0.7)" }}
+          >
+            REBOOT GPU RENDERER
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 const easeOutBack = (x: number) => {
@@ -278,10 +369,10 @@ function ForgeObject({
         <meshStandardMaterial
           color={obj.color}
           emissive={obj.color}
-          emissiveIntensity={0.16}
-          metalness={0.38}
-          roughness={0.26}
-          flatShading={obj.shape === "gem" || obj.shape === "cube"}
+          emissiveIntensity={profileFinish().emissive}
+          metalness={profileFinish().metal}
+          roughness={profileFinish().rough}
+          flatShading={profileFinish().flat || obj.shape === "gem" || obj.shape === "cube"}
         />
       </mesh>
       <mesh scale={1.07}>
@@ -550,6 +641,7 @@ function Scene({
 
   /* ---- per-frame: hand cursor, hand grab, object animation ---- */
   useFrame((state, dt) => {
+    coreHeart.frames++;
     if (!readySent.current) {
       readySent.current = true;
       onReady?.();
@@ -731,14 +823,7 @@ export default function Assistant3D({
   }, []);
 
   if (!webglOk) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
-        <p className="font-mono text-[10px] tracking-[0.3em] text-ember">RENDERER OFFLINE</p>
-        <p className="max-w-sm font-mono text-[9px] leading-relaxed tracking-[0.14em] text-mist-500">
-          NO WEBGL CONTEXT AVAILABLE — THE 3D CORE NEEDS GPU ACCELERATION. ENABLE HARDWARE ACCELERATION IN BROWSER SETTINGS, THEN RELOAD.
-        </p>
-      </div>
-    );
+    return <FallbackCore accent={persona.accent} mood={mood} note="NO WEBGL — CPU AVATAR ACTIVE · ENABLE HARDWARE ACCELERATION FOR FULL 3D" />;
   }
 
   return (

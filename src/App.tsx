@@ -1,12 +1,14 @@
 import { Component, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
-import Assistant3D from "./components/Assistant3D";
+import Assistant3D, { FallbackCore } from "./components/Assistant3D";
 import type { BeatRef } from "./components/Assistant3D";
 import StudioPanel from "./components/StudioPanel";
 import ChatPanel from "./components/ChatPanel";
 import HandOverlay from "./components/HandOverlay";
-import { DockBar, GalleryPanel, ObjectForge } from "./components/Docks";
-import type { DockTab } from "./components/Docks";
+import { GalleryPanel, ObjectForge, TastePanel } from "./components/Docks";
+import HudRail, { UtcClock } from "./components/HudRail";
+import type { FlyoutId } from "./components/HudRail";
+import { taste, refineImagePrompt, auditConsole, auditScore } from "./lib/taste";
 import KernelPanel from "./components/KernelPanel";
 import { kernel, kernelNum, planFromText, fmtVal } from "./lib/kernel";
 import { PERSONAS, getPersona, alpha } from "./lib/personas";
@@ -55,7 +57,7 @@ interface LogEntry {
   msg: string;
 }
 
-/* ---------- tiny UI atoms ---------- */
+/* ---------- tiny UI atoms (legacy rail atoms removed — see HudRail.tsx) ---------- */
 
 function Toggle({ on, onClick, accent, label }: { on: boolean; onClick: () => void; accent: string; label: string }) {
   return (
@@ -139,7 +141,7 @@ function RailMini({
   onHands: () => void;
   listening: boolean;
   onListen: () => void;
-  onTab: (t: DockTab) => void;
+  onTab: (t: FlyoutId) => void;
   viewMode: "core" | "gods";
   onGods: () => void;
   liveOpen: boolean;
@@ -339,10 +341,12 @@ function AppInner() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [typing, setTyping] = useState(false);
   const [input, setInput] = useState("");
-  const [tab, setTab] = useState<DockTab>(() => {
-    const s = store.get("orbit.tab");
-    return s === "gallery" || s === "forge" || s === "recon" ? (s as DockTab) : "studio";
-  });
+  const [tab, setTab] = useState<FlyoutId | null>(null);
+  const [seenMsgs, setSeenMsgs] = useState(0);
+  useEffect(() => {
+    if (tab === "chat") setSeenMsgs(messages.length);
+  }, [tab, messages.length]);
+  const unread = tab === "chat" ? 0 : Math.max(0, messages.length - seenMsgs);
   const [railOpen, setRailOpen] = useState(() => store.get("orbit.rail") === "1");
   const importRef = useRef<HTMLInputElement>(null);
   const [images, setImages] = useState<GeneratedImage[]>([]);
@@ -386,6 +390,8 @@ function AppInner() {
   const [liveOpen, setLiveOpen] = useState(false);
   const [kernelRev, setKernelRev] = useState(0);
   useEffect(() => kernel.onChange(() => setKernelRev((r) => r + 1)), []);
+  const [tasteProfile, setTasteProfile] = useState(() => taste.active());
+  useEffect(() => taste.onChange(() => setTasteProfile(taste.active())), []);
   const [speaking, setSpeaking] = useState(false);
 
   /* ---------- refs ---------- */
@@ -414,9 +420,7 @@ function AppInner() {
   useEffect(() => {
     store.set("orbit.persona", personaId);
     store.set("orbit.voice", voiceOut ? "1" : "0");
-    store.set("orbit.tab", tab);
-    store.set("orbit.rail", railOpen ? "1" : "0");
-  }, [personaId, voiceOut, tab, railOpen]);
+  }, [personaId, voiceOut]);
 
   /* ---------- keyboard transport ---------- */
   useEffect(() => {
@@ -797,9 +801,11 @@ function AppInner() {
         }
         case "stop":
           engine.stop();
+          stopSpeaking();
+          setSpeaking(false);
           setMood("idle");
           reply(simpleLine(pid, "stop"));
-          addLog("playback stopped");
+          addLog("playback + voice stopped");
           return;
         case "play": {
           if (trackRef.current && !engine.isPlaying) {
@@ -916,8 +922,48 @@ function AppInner() {
           reply(extraLine(pid, "webrtcDone"));
           return;
         }
+        case "taste": {
+          const names: [RegExp, string][] = [
+            [/signal|console|instrument/i, "signal"],
+            [/editorial|sheet|broad|magazine/i, "editorial"],
+            [/cinema|film|movie|noir(?!.*terminal)/i, "cinema"],
+            [/brutal|raw|hard ?edge/i, "brutal"],
+            [/organic|nature|moss|grown/i, "organic"],
+            [/terminal|phosphor|crt|hacker/i, "terminal"],
+          ];
+          const hit = names.find(([re]) => re.test(text))?.[1];
+          if (hit && taste.set(hit)) {
+            const prof = taste.active();
+            setTab("taste");
+            reply(extraLine(pid, "tasteApplied", { profile: prof.name }));
+            addLog(`taste: doctrine → ${prof.name}`);
+          } else {
+            setTab("taste");
+            reply(extraLine(pid, "tasteOpen", { profile: taste.active().name }));
+            addLog("taste: doctrine console opened");
+          }
+          return;
+        }
+        case "audit": {
+          const checks = auditConsole();
+          const score = auditScore(checks);
+          const failed = checks.filter((c) => !c.pass);
+          setTab("taste");
+          reply(
+            extraLine(pid, "tasteAudit", {
+              profile: taste.active().name,
+              passed: checks.filter((c) => c.pass).length,
+              total: checks.length,
+            }) +
+              (failed.length
+                ? ` Watch-list: ${failed.map((f) => f.name.toLowerCase()).join(", ")}.`
+                : " The watch-list is empty — ship it.")
+          );
+          addLog(`taste: self-audit ${score}`);
+          return;
+        }
         case "image": {
-          const prompt = det.imagePrompt ?? "an abstract dreamscape";
+          const prompt = refineImagePrompt(det.imagePrompt ?? "an abstract dreamscape");
           reply(extraLine(pid, "imageStart", { prompt }));
           addLog(`rendering: “${prompt}”`);
           setTab("gallery");
@@ -1220,6 +1266,8 @@ function AppInner() {
       "hands on",
       "optimize house tempo",
       "open the kernel",
+      "audit the ui",
+      "apply cinema grade",
       `switch to ${other.name.toLowerCase()}`,
     ];
   }, [personaId]);
@@ -1228,8 +1276,8 @@ function AppInner() {
 
   return (
     <div
-      className="relative flex h-screen w-full overflow-hidden font-body text-mist-100"
-      style={{ "--acc": persona.accent } as CSSProperties}
+      className="relative flex h-screen w-full flex-col overflow-hidden font-body text-mist-100"
+      style={{ "--acc": persona.accent, height: "100dvh" } as CSSProperties}
     >
       {/* ambient backdrop */}
       <div className="pointer-events-none absolute inset-0 z-0">
@@ -1246,7 +1294,103 @@ function AppInner() {
         <div className="scan-layer absolute inset-0" />
       </div>
 
-      {/* ============ LEFT · identity + modules + log ============ */}
+      {/* ============ TOP BAR · identity + cores + status ============ */}
+      <header className="relative z-30 flex h-12 shrink-0 items-center gap-3 border-b border-ink-700/60 bg-ink-900/80 px-4 backdrop-blur-md">
+        <div className="flex items-center gap-2.5">
+          <svg width="26" height="26" viewBox="0 0 34 34" fill="none" aria-hidden className="shrink-0">
+            <circle cx="17" cy="17" r="6" fill={persona.accent} opacity="0.9" />
+            <circle cx="17" cy="17" r="6" fill="none" stroke="#eaf4f3" strokeOpacity="0.4" />
+            <ellipse cx="17" cy="17" rx="14.5" ry="5.5" stroke={persona.accent} strokeOpacity="0.75" transform="rotate(-18 17 17)" />
+            <circle cx="28.5" cy="11.5" r="1.8" fill="#eaf4f3" />
+          </svg>
+          <div className="leading-none">
+            <h1 className="font-display text-[13px] font-extrabold tracking-[0.3em] text-mist-100">ORBIT</h1>
+            <p className="mt-0.5 hidden font-mono text-[6.5px] tracking-[0.24em] text-mist-600 sm:block">FULLSTACK AGENT CONSOLE</p>
+          </div>
+        </div>
+
+        <div className="h-6 w-px bg-ink-700/80" />
+
+        {/* persona cores */}
+        <div className="no-scrollbar flex min-w-0 flex-1 items-center gap-1 overflow-x-auto lg:flex-none">
+          {PERSONAS.map((p) => {
+            const active = p.id === personaId;
+            return (
+              <button
+                key={p.id}
+                onClick={() => switchPersona(p.id)}
+                title={`${p.name} — ${p.role}`}
+                className="flex items-center gap-1.5 border px-2 py-1.5 transition-all duration-150 hover:-translate-y-px"
+                style={{
+                  borderColor: active ? p.accent : "#1c313b",
+                  background: active ? alpha(p.accent, 0.12) : "transparent",
+                  boxShadow: active ? `0 0 14px -6px ${p.accent}` : "none",
+                }}
+              >
+                <span className="h-1.5 w-1.5 rotate-45 transition-transform duration-300" style={{ background: p.accent, boxShadow: active ? `0 0 8px ${p.accent}` : "none", transform: active ? "rotate(225deg)" : "rotate(45deg)" }} />
+                <span className="font-mono text-[8.5px] font-bold tracking-[0.18em]" style={{ color: active ? p.accent : "#8cacac" }}>
+                  {p.name}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="hidden min-w-0 flex-1 lg:block" />
+
+        {/* live status cluster */}
+        <div className="hidden items-center gap-1.5 lg:flex">
+          {track && (
+            <button
+              onClick={() => {
+                if (engine.isPlaying) {
+                  engine.stop();
+                  setMood("idle");
+                  addLog("playback stopped from top bar");
+                } else {
+                  engine.play(track);
+                  setMood("djing");
+                  addLog("playback resumed from top bar");
+                }
+              }}
+              title={engine.isPlaying ? "Stop playback" : "Resume playback"}
+              className={`flex items-center gap-1.5 border px-2 py-1 transition-all hover:-translate-y-px ${engine.isPlaying ? "" : "opacity-70"}`}
+              style={{ borderColor: alpha(persona.accent, 0.4), background: alpha(persona.accent, 0.06) }}
+            >
+              <span className={`flex h-2.5 items-end gap-[1.5px] ${engine.isPlaying ? "eq-live" : ""}`}>
+                {[0, 1, 2].map((i) => (
+                  <span key={i} className="eq-bar w-[2px]" style={{ height: `${4 + i * 2}px`, background: persona.accent, animationDelay: `${i * 0.14}s` }} />
+                ))}
+              </span>
+              <span className="max-w-[110px] truncate font-mono text-[8px] tracking-[0.14em]" style={{ color: persona.accent }}>
+                {track.title.toUpperCase()}
+              </span>
+            </button>
+          )}
+          {ttsEngine && voiceOut && (
+            <button onClick={toggleVoiceOut} className="border px-1.5 py-1 font-mono text-[7.5px] tracking-[0.16em] transition-all hover:-translate-y-px" style={{ borderColor: ttsEngine.engine === "edge" ? "#9be15d66" : "#213843", color: ttsEngine.engine === "edge" ? "#9be15d" : "#8cacac" }} title="Speech engine — click to mute agent voice">
+              {ttsEngine.engine === "edge" ? "EDGE NEURAL" : "LOCAL VOICE"}
+            </button>
+          )}
+          {kernel.count() > 0 && (
+            <button onClick={() => setTab("kernel")} className="border px-1.5 py-1 font-mono text-[7.5px] tracking-[0.16em] transition-colors" style={{ borderColor: alpha(persona.accent, 0.4), color: persona.accent }} title="Kernel patches live">
+              ⌬ {kernel.count()} PATCH{kernel.count() === 1 ? "" : "ES"}
+            </button>
+          )}
+          {handsOn && (
+            <button onClick={() => setHands(false)} className="flex items-center gap-1 border px-1.5 py-1 font-mono text-[7.5px] tracking-[0.16em] transition-all hover:-translate-y-px" style={{ borderColor: alpha(persona.accent, 0.4), color: persona.accent }} title="Barehands tracking — click to disengage">
+              <span className={`h-1 w-1 rounded-full ${handsStatus === "active" ? "pulse-dot" : ""}`} style={{ background: persona.accent }} />
+              HANDS
+            </button>
+          )}
+        </div>
+
+        <div className="hidden h-6 w-px bg-ink-700/80 md:block" />
+        <div className="hidden md:block"><UtcClock accent={persona.accent} /></div>
+      </header>
+
+      {/* LEGACY left rail — neutralized: layout is now full-viewport + HUD rail */}
+      {(false as boolean) && (
       <aside
         className={`z-10 flex shrink-0 flex-col overflow-hidden border-r border-ink-700/60 bg-ink-900/75 backdrop-blur-md transition-[width] duration-300 ${
           railOpen ? "w-[266px]" : "w-[56px]"
@@ -1508,6 +1652,20 @@ function AppInner() {
           />
 
           <ModuleRow
+            title="TASTE SKILL"
+            sub={`ANTI-SLOP DOCTRINE · ${tasteProfile.name}`}
+            right={
+              <button
+                onClick={() => setTab("taste")}
+                className="border px-2 py-1 font-mono text-[8px] tracking-[0.16em] transition-all hover:-translate-y-px"
+                style={{ borderColor: `${tasteProfile.accent}66`, color: tasteProfile.accent, background: alpha(tasteProfile.accent, 0.08) }}
+              >
+                DOCTRINE →
+              </button>
+            }
+          />
+
+          <ModuleRow
             title="RECON BOARDS"
             sub={
               board
@@ -1601,9 +1759,10 @@ function AppInner() {
           />
         )}
       </aside>
+      )}
 
-      {/* ============ CENTER · stage + dock ============ */}
-      <main className="z-10 flex min-w-0 flex-1 flex-col">
+      {/* ============ CENTER · stage = full viewport ============ */}
+      <main className="relative z-10 flex min-h-0 min-w-0 flex-1 flex-col">
         <div
           className="relative min-h-0 flex-1"
           onDragOver={(e) => {
@@ -1624,7 +1783,7 @@ function AppInner() {
           <div
             className={`absolute flex flex-col ${
               viewMode === "gods"
-                ? "pip-in origin-bottom-right bottom-4 right-4 z-40 h-[244px] w-[348px] border bg-ink-900/95"
+                ? "pip-in origin-bottom-right bottom-[92px] right-2 z-40 h-[176px] w-[248px] border bg-ink-900/95 lg:bottom-4 lg:right-16 lg:h-[244px] lg:w-[348px]"
                 : "inset-0"
             }`}
             style={
@@ -1696,44 +1855,30 @@ function AppInner() {
                 />
               </StageBoundary>
 
-              {/* ignition veil — visible until the renderer reports its first frame */}
-              {!coreReady && !coreStalled && (
-                <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-ink-950/85">
-                  <div className="flex items-center gap-2">
-                    {[0, 1, 2].map((i) => (
-                      <span key={i} className="tdot h-1.5 w-1.5 rounded-full" style={{ background: persona.accent }} />
-                    ))}
-                  </div>
-                  <p className="font-mono text-[10px] tracking-[0.32em]" style={{ color: persona.accent }}>
-                    IGNITING CORE
-                  </p>
-                  <p className="font-mono text-[8px] tracking-[0.18em] text-mist-600">ALLOCATING WEBGL CONTEXT…</p>
-                </div>
-              )}
-
-              {/* stall diagnostics — the viewport can never fail silently */}
-              {coreStalled && (
-                <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2.5 bg-ink-950/95 p-4 text-center">
-                  <p className="font-mono text-[10px] tracking-[0.28em] text-atlas">CORE STALLED — NO FIRST FRAME</p>
-                  <p className="max-w-[420px] font-mono text-[8.5px] leading-relaxed tracking-[0.12em] text-mist-500">
-                    THE RENDERER MOUNTED BUT NEVER DREW A FRAME. USUAL CAUSES: GPU PROCESS CRASH, HARDWARE ACCELERATION DISABLED, OR AN EXTENSION BLOCKING WEBGL.
-                  </p>
-                  <p className="font-mono text-[8px] tracking-[0.16em]" style={{ color: webglProbe ? "#9be15d" : "#ff5d5d" }}>
-                    WEBGL PROBE: {webglProbe ? "CONTEXT AVAILABLE" : "CONTEXT UNAVAILABLE"}
-                  </p>
-                  <button
-                    onClick={() => {
-                      coreReadyRef.current = false;
-                      setCoreReady(false);
-                      setCoreStalled(false);
-                      setStageEpoch((e) => e + 1);
-                      addLog("core: reboot requested");
-                    }}
-                    className="mt-1 border border-atlas px-4 py-2 font-mono text-[9px] tracking-[0.24em] text-atlas transition-all hover:-translate-y-px hover:bg-atlas/10"
-                  >
-                    REBOOT CORE
-                  </button>
-                </div>
+              {/* the assistant is ALWAYS visible: until the GPU renderer reports its
+                  first frame, the living CPU avatar holds the frame — ignition,
+                  stall, and reboot all happen around it, never instead of it */}
+              {!coreReady && (
+                <FallbackCore
+                  accent={persona.accent}
+                  mood={mood}
+                  note={
+                    coreStalled
+                      ? `GPU STALLED · WEBGL PROBE: ${webglProbe ? "AVAILABLE" : "UNAVAILABLE"} · CPU AVATAR HOLDING THE FRAME`
+                      : "IGNITING GPU RENDERER…"
+                  }
+                  onReboot={
+                    coreStalled
+                      ? () => {
+                          coreReadyRef.current = false;
+                          setCoreReady(false);
+                          setCoreStalled(false);
+                          setStageEpoch((e) => e + 1);
+                          addLog("core: reboot requested");
+                        }
+                      : undefined
+                  }
+                />
               )}
 
               {/* PIP corner ticks + LIVE badge */}
@@ -1790,7 +1935,7 @@ function AppInner() {
                 setViewMode("core");
                 addLog("god's eye: deck closed");
               }}
-              className="absolute right-5 top-5 z-30 flex items-center gap-2 border px-3 py-2 font-mono text-[9px] tracking-[0.22em] transition-all hover:-translate-y-0.5"
+              className="absolute right-3 top-14 z-30 flex items-center gap-2 border px-3 py-2 font-mono text-[9px] tracking-[0.22em] transition-all hover:-translate-y-0.5 lg:right-16 lg:top-5"
               style={{
                 borderColor: alpha(persona.accent, 0.55),
                 color: persona.accent,
@@ -1862,7 +2007,7 @@ function AppInner() {
           </div>
 
           {/* control hint */}
-          <p className="pointer-events-none absolute bottom-4 right-5 z-10 font-mono text-[7.5px] tracking-[0.2em] text-mist-600">
+          <p className="pointer-events-none absolute bottom-4 left-1/2 z-10 hidden -translate-x-1/2 font-mono text-[7.5px] tracking-[0.2em] text-mist-600 md:block">
             DRAG ORBIT · SPACE · PLAY/STOP · {handsStatus === "active" ? "PINCH GRABS OBJECTS" : "“HANDS ON” FOR WEBCAM CONTROL"}
           </p>
 
@@ -1871,21 +2016,9 @@ function AppInner() {
           )}
         </div>
 
-        {/* dock */}
-        <div
-          className={`flex shrink-0 flex-col border-t border-ink-700/60 bg-ink-900/75 backdrop-blur-md transition-[height] duration-500 ${
-            tab === "recon" || tab === "kernel" ? "h-[420px]" : "h-[258px]"
-          }`}
-        >
-          <DockBar
-            tab={tab}
-            setTab={setTab}
-            imageCount={images.length}
-            objectCount={objects.length}
-            reconCount={board ? board.sections.filter((s) => s.status === "done" || s.status === "fallback").length : undefined}
-            kernelCount={kernel.count()}
-            accent={persona.accent}
-          />
+        {/* dock removed — modules now live in HUD rail flyouts */}
+        {(false as boolean) && (
+        <div className="hidden">
           <div className="min-h-0 flex-1">
             {tab === "studio" && (
               <StudioPanel track={track} persona={persona} onGenerate={handleGenerate} onTrackChange={setTrack} />
@@ -1922,9 +2055,21 @@ function AppInner() {
                   addLog("forge field cleared");
                 }}
                 accent={persona.accent}
+                palette={tasteProfile.palette}
               />
             )}
             {tab === "kernel" && <KernelPanel accent={persona.accent} onEvent={addLog} />}
+            {tab === "taste" && (
+              <TastePanel
+                profile={tasteProfile}
+                accent={persona.accent}
+                onApply={(id) => {
+                  taste.set(id);
+                  addLog(`taste: doctrine → ${taste.active().name}`);
+                }}
+                onEvent={addLog}
+              />
+            )}
             {tab === "recon" && (
               <div className="flex h-full min-h-0 flex-col">
                 {/* phase toggle: reference board (phase 1) → premodel gate (phase 2) */}
@@ -1973,28 +2118,178 @@ function AppInner() {
             )}
           </div>
         </div>
+        )}
       </main>
 
-      {/* ============ RIGHT · comms ============ */}
-      <section className="z-10 w-[384px] shrink-0 border-l border-ink-700/60 bg-ink-900/75 backdrop-blur-md">
-        <ChatPanel
-          messages={messages}
-          persona={persona}
-          typing={typing}
-          input={input}
-          setInput={setInput}
-          onSend={sendMessage}
-          suggestions={suggestions}
-          listening={listening}
-          onMicToggle={() => setListen(!listening)}
-          voiceOut={voiceOut}
-          onVoiceOutToggle={toggleVoiceOut}
-          speaking={speaking}
-          interim={interim}
-          onRevealed={onRevealed}
-          voiceChip={voiceOut ? (ttsEngine ? `${ttsEngine.engine === "edge" ? "EDGE" : "LOCAL"} · ${ttsEngine.label.split(" ")[0].toUpperCase()}` : `NEURAL · ${voiceLabelFor(personaId).label.split(" ")[0].toUpperCase()}`) : null}
-        />
-      </section>
+      {/* ============ HUD RAIL + FLYOUT MODULES ============ */}
+      <HudRail
+        flyout={tab}
+        setFlyout={setTab}
+        accent={persona.accent}
+        items={[
+          { id: "chat", label: "Comms channel", badge: unread, pulse: typing || speaking },
+          { id: "studio", label: "Waveforge studio" },
+          { id: "gallery", label: "Synthesis gallery" },
+          { id: "forge", label: "Object forge", badge: objects.length || undefined },
+          { id: "recon", label: "Recon boards" },
+          { id: "kernel", label: "Kernel console", badge: kernel.count() || undefined },
+          { id: "taste", label: "Taste skill" },
+          { id: "log", label: "Event log" },
+        ]}
+        toggles={[
+          { id: "hands", label: handsOn ? "Barehands · on" : "Barehands · off", on: handsOn, onClick: () => setHands(!handsOn) },
+          { id: "mic", label: listening ? "Voice link · live" : "Voice link · cold", on: listening, disabled: !micSupported, onClick: () => setListen(!listening) },
+          { id: "voice", label: voiceOut ? "Agent voice · on" : "Agent voice · muted", on: voiceOut, onClick: toggleVoiceOut },
+          { id: "broadcast", label: liveOpen ? "Live stream · on air" : "Live stream", on: liveOpen, onClick: () => { if (!handsOn) setHands(true); setLiveOpen(true); addLog("live stream monitor opened"); } },
+          { id: "eye", label: viewMode === "gods" ? "Return to core" : "God's eye deck", on: viewMode === "gods", onClick: () => { setViewMode(viewMode === "core" ? "gods" : "core"); addLog(viewMode === "core" ? "god's eye: deck opened" : "god's eye: deck closed"); } },
+        ]}
+      >
+        {tab === "chat" && (
+          <ChatPanel
+            messages={messages}
+            persona={persona}
+            typing={typing}
+            input={input}
+            setInput={setInput}
+            onSend={sendMessage}
+            suggestions={suggestions}
+            listening={listening}
+            onMicToggle={() => setListen(!listening)}
+            voiceOut={voiceOut}
+            onVoiceOutToggle={toggleVoiceOut}
+            speaking={speaking}
+            interim={interim}
+            onRevealed={onRevealed}
+            voiceChip={voiceOut ? (ttsEngine ? `${ttsEngine.engine === "edge" ? "EDGE" : "LOCAL"} · ${ttsEngine.label.split(" ")[0].toUpperCase()}` : `NEURAL · ${voiceLabelFor(personaId).label.split(" ")[0].toUpperCase()}`) : null}
+          />
+        )}
+        {tab === "studio" && <StudioPanel track={track} persona={persona} onGenerate={handleGenerate} onTrackChange={setTrack} />}
+        {tab === "gallery" && (
+          <GalleryPanel
+            images={images}
+            busyPrompt={imagesBusy}
+            pinnedIds={pinned.map((p) => p.id)}
+            onPin={pinImage}
+            onRemove={(id) => {
+              setImages((prev) => prev.filter((i) => i.id !== id));
+              setPinned((prev) => prev.filter((p) => p.id !== id));
+            }}
+            onPrompt={(p) => sendMessage(`draw ${p}`)}
+            onImport={importFiles}
+            accent={persona.accent}
+          />
+        )}
+        {tab === "forge" && (
+          <ObjectForge
+            objects={objects}
+            onSpawn={(shape, color) => {
+              if (objectsRef.current.length >= maxObjects()) {
+                addLog("field at capacity");
+                return;
+              }
+              spawnObject(shape, color);
+              addLog(`forged ${shape} from the flyout`);
+            }}
+            onRemove={(id) => setObjects((prev) => prev.filter((o) => o.id !== id))}
+            onClear={() => {
+              setObjects([]);
+              addLog("forge field cleared");
+            }}
+            accent={persona.accent}
+            palette={tasteProfile.palette}
+          />
+        )}
+        {tab === "recon" && (
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="flex shrink-0 items-center gap-1 border-b border-ink-700/60 bg-ink-900/70 px-2 py-1.5">
+              {(
+                [
+                  { id: "board", label: "PHASE 1 · REFERENCE BOARD" },
+                  { id: "gate", label: "PHASE 2 · PREMODEL GATE" },
+                ] as const
+              ).map((m) => {
+                const active = reconMode === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    onClick={() => setReconMode(m.id)}
+                    className="border px-2 py-1 font-mono text-[8px] tracking-[0.14em] transition-all"
+                    style={{
+                      borderColor: active ? persona.accent : "#213843",
+                      color: active ? persona.accent : "#8cacac",
+                      background: active ? alpha(persona.accent, 0.1) : "transparent",
+                      boxShadow: active ? `0 0 12px -4px ${persona.accent}` : "none",
+                    }}
+                  >
+                    {m.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="min-h-0 flex-1">
+              {reconMode === "board" ? (
+                <ReconPanel
+                  board={board}
+                  accent={persona.accent}
+                  onNew={startRecon}
+                  onRegenSection={regenSection}
+                  onDownloadSheet={downloadSheet}
+                />
+              ) : (
+                <PremodelPanel plan={gatePlan} accent={persona.accent} onRun={runGate} />
+              )}
+            </div>
+          </div>
+        )}
+        {tab === "kernel" && <KernelPanel accent={persona.accent} onEvent={addLog} />}
+        {tab === "taste" && (
+          <TastePanel
+            profile={tasteProfile}
+            accent={persona.accent}
+            onApply={(id) => {
+              taste.set(id);
+              addLog(`taste: doctrine → ${taste.active().name}`);
+            }}
+            onEvent={addLog}
+          />
+        )}
+        {tab === "log" && (
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
+              {log.length === 0 && (
+                <p className="py-8 text-center font-mono text-[9px] tracking-[0.18em] text-mist-600">NO EVENTS YET — THE CONSOLE IS QUIET</p>
+              )}
+              {[...log].reverse().map((l, i) => (
+                <div key={`${l.t}-${i}`} className="mb-1 flex items-baseline gap-2 border-b border-ink-700/40 pb-1">
+                  <span className="shrink-0 font-mono text-[8px] tracking-[0.1em] text-mist-600">
+                    {new Date(l.t).toLocaleTimeString("en-GB", { hour12: false })}
+                  </span>
+                  <span className={`min-w-0 flex-1 font-mono text-[9px] leading-relaxed ${i === 0 ? "text-mist-100" : "text-mist-500"}`}>{l.msg}</span>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() => setLog([])}
+              className="shrink-0 border-t border-ink-700/60 py-1.5 font-mono text-[8px] tracking-[0.2em] text-mist-600 transition-colors hover:text-ember"
+            >
+              PURGE LOG
+            </button>
+          </div>
+        )}
+      </HudRail>
+
+      {/* ambient event ticker — keeps the viewport alive without stealing it */}
+      {log.length > 0 && tab !== "log" && (
+        <button
+          key={log.length}
+          onClick={() => setTab("log")}
+          className="ticker-in absolute bottom-[88px] left-3 z-20 flex max-w-[70%] items-center gap-2 border border-ink-700/70 bg-ink-950/70 px-2.5 py-1.5 text-left backdrop-blur-sm transition-colors hover:border-mist-600 lg:bottom-4 lg:left-5 lg:max-w-[46%]"
+          title="Open event log"
+        >
+          <span className="pulse-dot h-1 w-1 shrink-0 rounded-full" style={{ background: persona.accent }} />
+          <span className="truncate font-mono text-[8px] tracking-[0.14em] text-mist-500">{log[log.length - 1].msg.toUpperCase()}</span>
+        </button>
+      )}
 
       {/* ============ LIVE STREAM BROADCAST ============ */}
       {liveOpen && handsEngineRef.current && (

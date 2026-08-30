@@ -163,6 +163,50 @@ input[type="range"]::-moz-range-thumb {
 }
 .pulse-dot { animation: pulse-dot 1.8s ease-out infinite; }
 
+/* ---------- CPU fallback avatar ---------- */
+@keyframes fc-rot {
+  to { transform: rotate(360deg); }
+}
+@keyframes fc-breathe-kf {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.09); }
+}
+@keyframes fc-halo-kf {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+.fc-spin, .fc-spin-rev, .fc-orbit, .fc-breathe {
+  transform-box: view-box;
+  transform-origin: 150px 150px;
+}
+.fc-spin { animation: fc-rot calc(40s * var(--fc-speed, 1)) linear infinite; }
+.fc-spin-rev { animation: fc-rot calc(58s * var(--fc-speed, 1)) linear infinite reverse; }
+.fc-orbit { animation: fc-rot calc(22s * var(--fc-speed, 1)) linear infinite; }
+.fc-breathe { animation: fc-breathe-kf calc(2.6s * var(--fc-speed, 1)) ease-in-out infinite; }
+.fc-halo { animation: fc-halo-kf calc(3.4s * var(--fc-speed, 1)) ease-in-out infinite; }
+
+@keyframes sheet-in {
+  from { transform: translateY(100%); opacity: 0.4; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.sheet-in { animation: sheet-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+@keyframes flyout-in {
+  from { opacity: 0; transform: translate(14px, -50%); }
+  to { opacity: 1; transform: translate(0, -50%); }
+}
+.flyout-in { animation: flyout-in 0.22s cubic-bezier(0.2, 0.8, 0.3, 1) both; }
+.flyout-body { height: min(66vh, 580px); }
+
+@keyframes ticker-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.ticker-in { animation: ticker-in 0.3s ease-out both; }
+
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }

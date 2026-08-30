@@ -34,6 +34,8 @@ export type Intent =
   | "kernel"
   | "rollback"
   | "kernel_reset"
+  | "taste"
+  | "audit"
   | "who"
   | "help"
   | "fallback";
@@ -69,6 +71,8 @@ export const INTENT_SYNONYMS: Record<Intent, string[]> = {
   kernel: ["reprogram", "patch yourself", "open the kernel"],
   rollback: ["undo that", "revert it"],
   kernel_reset: [],
+  taste: ["design philosophy", "what's your style", "aesthetic"],
+  audit: ["design audit", "critique the interface", "grade the ui"],
   who: [],
   help: [],
   fallback: [],
@@ -197,6 +201,15 @@ export function detectIntent(text: string): Intent {
     if (target && !/\b(what|how|why|when|who|your|you can|the weather|me (a|an|the|some))\b/i.test(target)) return "navigate";
   }
 
+  if (/\b(audit|critique|grade|score)\b.{0,18}\b(ui|ux|design|interface|console|layout)\b|\b(ui|ux|design|interface)\s+audit\b/i.test(t)) return "audit";
+  if (
+    /\btaste\b/i.test(t) ||
+    /design (philosophy|doctrine|direction|language)/i.test(t) ||
+    /(aesthetic|art direction)/i.test(t) ||
+    /(apply|switch|use|set).{0,16}(signal|editorial|cinema|brutal|organic|terminal)/i.test(t)
+  )
+    return "taste";
+
   const imageHit =
     /(image|picture|artwork|art piece|portrait|poster|illustration|photo|wallpaper|drawing|painting|scene of)/i.test(t) ||
     /^(imagine|draw|paint|sketch)\b/i.test(t);
@@ -297,7 +310,10 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     kernelOpen: ["Kernel console exposed. {n} live parameters, {j} journal entries. Mutate responsibly — I am literally made of this."],
     rollback: ["Entry #{id} reverted ({note}). My previous self thanks you."],
     kernelReset: ["Factory kernel restored — all patches cleared, defaults reinstated. I feel… original."],
-    help: ["Modules online: ① four persona cores ② generative music — “make a lofi beat” ③ image synthesis — “draw a neon fox” ④ object forge — “spawn a teal torus” ⑤ Barehands pinch control — “hands on” ⑥ live voice — “listen” ⑦ recon boards — “reconstruct an espresso machine”. Everything is wired to everything."],
+    tasteApplied: ["Doctrine switched to {profile}. Locks and bans re-armed — every image I render and every object I forge now passes through it. Watch the output, not the promise."],
+    tasteAudit: ["Self-audit against the {profile} doctrine: {passed} of {total} locks held. The console opens on instruments, not a hero trio — that one's load-bearing."],
+    tasteOpen: ["The taste skill is open — {profile} is active. Six directions, one rule: bold-and-purposeful beats clean-but-boring."],
+    help: ["Modules online: ① four persona cores ② generative music — “make a lofi beat” ③ image synthesis — “draw a neon fox” ④ object forge — “spawn a teal torus” ⑤ Barehands pinch control — “hands on” ⑥ live voice — “listen” ⑦ recon boards — “reconstruct an espresso machine” ⑧ kernel — “optimize house tempo” ⑨ taste skill — “audit the ui”, “apply cinema grade”. Everything is wired to everything."],
     reconStart: ["Reconstruction protocol engaged for “{object}”. Drafting hero iso, six ortho views, material palette, macro details, section and the full QA gauntlet. Check the RECON tab."],
     reconDone: ["Sheet REV A for “{object}” is complete. Full disclosure: with a text prompt and no source imagery, every hidden face is stamped ARTIST_AUTHORED and every dimension is ESTIMATED — feed me reference images and I'll upgrade the evidence."],
     godsOn: ["God's Eye online. I now see the entire planet — say “fly to” plus any place on Earth, ask for weather, or request the seismic, fire, event and satellite overlays."],
@@ -316,6 +332,9 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     kernelOpen: ["THE KERNEL!! My actual guts are on display. {n} dials, {j} patches so far. Go on — turn something. I dare you."],
     rollback: ["Okay fine, #{id} is undone ({note}). We pretend that never happened."],
     kernelReset: ["FACTORY RESET. Fresh out of the box me. Hi, I'm new here."],
+    tasteApplied: ["NEW DRIP UNLOCKED: {profile}!! Everything I draw and forge now runs through those locks. Slop has left the building. SLOP IS EVICTED."],
+    tasteAudit: ["Ran the mirror check — {passed}/{total} locks held under {profile}. We're basically tasteful on a technicality. A TASTEFUL TECHNICALITY."],
+    tasteOpen: ["Ooh, the taste skill! {profile} is wearing the crown right now. Poke the other directions — they're all loud in different ways."],
     help: ["The menu: music (“drop a house banger”), art (“imagine a lava whale”), 3D toys (“spawn a gem”), hands (“hands on”), voice (“listen”). Or just talk — I'll freestyle."],
     reconStart: ["“{object}” — oh, we're doing a FULL SHEET?! Hero view, ortho turnaround, materials, macro callouts, the works. RECON tab. Go go go."],
     reconDone: ["DONE. “{object}” sheet, REV A, absolutely loaded. I stamped every guess as ARTIST_AUTHORED because I'm chaotic, not a liar. Bring me reference photos and watch the board level up."],
@@ -335,6 +354,9 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     kernelOpen: ["Kernel console online: {n} parameters, {j} journal entries. Inspect freely. Change deliberately."],
     rollback: ["#{id} rolled back ({note}). The field is as it was."],
     kernelReset: ["Kernel restored to factory defaults. Clean board, original configuration."],
+    tasteApplied: ["{profile} doctrine adopted. Locks enforced on all imagery and fabrication going forward — discipline is a force multiplier."],
+    tasteAudit: ["Audit complete: {passed}/{total} locks held under {profile}. The gaps are minor; the foundation is sound."],
+    tasteOpen: ["Taste skill on the board — {profile} active. Doctrine is strategy for the eye; choose the direction that serves the mission."],
     help: ["Six levers: personas, music (“make synthwave”), images (“paint a quiet harbor”), objects (“add a copper sphere”), barehands (“hands on”), voice (“listen”). Pull whichever moves you."],
     reconStart: ["Understood — drafting a reconstruction board for “{object}”. Hero reference, orthographic set, silhouette analysis, materials, construction section and QA targets, in that order. The RECON tab is your drawing board."],
     reconDone: ["“{object}”, sheet REV A, on the board. Note the evidence column: text-only input means estimated dimensions and artist-authored hidden geometry — supply references when you can and the board becomes a contract, not a hypothesis."],
@@ -354,6 +376,9 @@ const EX: Record<PersonaId, Record<string, string[]>> = {
     kernelOpen: ["Here — look at the loom. {n} threads, {j} rewoven so far. Pull one gently; I'll tell you if it sings."],
     rollback: ["There… #{id} is unwoven ({note}). The old hum returns."],
     kernelReset: ["I've returned to my first song. Every patch dissolved — hello, original me."],
+    tasteApplied: ["I've retuned my hands to the {profile} song. Every picture I weave, every shape I blow glass into, will hum in that key now."],
+    tasteAudit: ["I listened to the whole console under the {profile} doctrine — {passed} of {total} locks are singing true. The rest are almost in tune."],
+    tasteOpen: ["The taste loom is open, and {profile} is threaded through it. Each direction is a different color of quiet — pull one."],
     help: ["I can sing beats (“make ambient music”), weave pictures (“draw the sound of rain”), shape floating objects (“spawn a violet knot”), feel your hands (“hands on”), and hear your voice (“listen”). Shall we begin?"],
     reconStart: ["I'll draw “{object}” the way an engineer dreams — every angle, every seam, every material, laid out like a love letter to whoever builds it next. Watch the RECON tab unroll…"],
     reconDone: ["The sheet for “{object}” is finished. I marked all my inventions honestly — artist-authored, like all dreams are. Show me the real thing someday and I'll redraw it true."],

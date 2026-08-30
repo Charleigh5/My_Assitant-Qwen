@@ -5,8 +5,9 @@ import type { BeatRef } from "./components/Assistant3D";
 import StudioPanel from "./components/StudioPanel";
 import ChatPanel from "./components/ChatPanel";
 import HandOverlay from "./components/HandOverlay";
-import { DockBar, GalleryPanel, ObjectForge } from "./components/Docks";
+import { DockBar, GalleryPanel, ObjectForge, TastePanel } from "./components/Docks";
 import type { DockTab } from "./components/Docks";
+import { taste, refineImagePrompt, auditConsole, auditScore } from "./lib/taste";
 import KernelPanel from "./components/KernelPanel";
 import { kernel, kernelNum, planFromText, fmtVal } from "./lib/kernel";
 import { PERSONAS, getPersona, alpha } from "./lib/personas";
@@ -341,7 +342,7 @@ function AppInner() {
   const [input, setInput] = useState("");
   const [tab, setTab] = useState<DockTab>(() => {
     const s = store.get("orbit.tab");
-    return s === "gallery" || s === "forge" || s === "recon" ? (s as DockTab) : "studio";
+    return s === "gallery" || s === "forge" || s === "recon" || s === "kernel" || s === "taste" ? (s as DockTab) : "studio";
   });
   const [railOpen, setRailOpen] = useState(() => store.get("orbit.rail") === "1");
   const importRef = useRef<HTMLInputElement>(null);
@@ -386,6 +387,8 @@ function AppInner() {
   const [liveOpen, setLiveOpen] = useState(false);
   const [kernelRev, setKernelRev] = useState(0);
   useEffect(() => kernel.onChange(() => setKernelRev((r) => r + 1)), []);
+  const [tasteProfile, setTasteProfile] = useState(() => taste.active());
+  useEffect(() => taste.onChange(() => setTasteProfile(taste.active())), []);
   const [speaking, setSpeaking] = useState(false);
 
   /* ---------- refs ---------- */
@@ -916,8 +919,48 @@ function AppInner() {
           reply(extraLine(pid, "webrtcDone"));
           return;
         }
+        case "taste": {
+          const names: [RegExp, string][] = [
+            [/signal|console|instrument/i, "signal"],
+            [/editorial|sheet|broad|magazine/i, "editorial"],
+            [/cinema|film|movie|noir(?!.*terminal)/i, "cinema"],
+            [/brutal|raw|hard ?edge/i, "brutal"],
+            [/organic|nature|moss|grown/i, "organic"],
+            [/terminal|phosphor|crt|hacker/i, "terminal"],
+          ];
+          const hit = names.find(([re]) => re.test(text))?.[1];
+          if (hit && taste.set(hit)) {
+            const prof = taste.active();
+            setTab("taste");
+            reply(extraLine(pid, "tasteApplied", { profile: prof.name }));
+            addLog(`taste: doctrine → ${prof.name}`);
+          } else {
+            setTab("taste");
+            reply(extraLine(pid, "tasteOpen", { profile: taste.active().name }));
+            addLog("taste: doctrine console opened");
+          }
+          return;
+        }
+        case "audit": {
+          const checks = auditConsole();
+          const score = auditScore(checks);
+          const failed = checks.filter((c) => !c.pass);
+          setTab("taste");
+          reply(
+            extraLine(pid, "tasteAudit", {
+              profile: taste.active().name,
+              passed: checks.filter((c) => c.pass).length,
+              total: checks.length,
+            }) +
+              (failed.length
+                ? ` Watch-list: ${failed.map((f) => f.name.toLowerCase()).join(", ")}.`
+                : " The watch-list is empty — ship it.")
+          );
+          addLog(`taste: self-audit ${score}`);
+          return;
+        }
         case "image": {
-          const prompt = det.imagePrompt ?? "an abstract dreamscape";
+          const prompt = refineImagePrompt(det.imagePrompt ?? "an abstract dreamscape");
           reply(extraLine(pid, "imageStart", { prompt }));
           addLog(`rendering: “${prompt}”`);
           setTab("gallery");
@@ -1220,6 +1263,8 @@ function AppInner() {
       "hands on",
       "optimize house tempo",
       "open the kernel",
+      "audit the ui",
+      "apply cinema grade",
       `switch to ${other.name.toLowerCase()}`,
     ];
   }, [personaId]);
@@ -1503,6 +1548,20 @@ function AppInner() {
                 style={{ borderColor: `${persona.accent}66`, color: persona.accent, background: alpha(persona.accent, 0.08) }}
               >
                 CONSOLE →
+              </button>
+            }
+          />
+
+          <ModuleRow
+            title="TASTE SKILL"
+            sub={`ANTI-SLOP DOCTRINE · ${tasteProfile.name}`}
+            right={
+              <button
+                onClick={() => setTab("taste")}
+                className="border px-2 py-1 font-mono text-[8px] tracking-[0.16em] transition-all hover:-translate-y-px"
+                style={{ borderColor: `${tasteProfile.accent}66`, color: tasteProfile.accent, background: alpha(tasteProfile.accent, 0.08) }}
+              >
+                DOCTRINE →
               </button>
             }
           />
@@ -1860,7 +1919,7 @@ function AppInner() {
         {/* dock */}
         <div
           className={`flex shrink-0 flex-col border-t border-ink-700/60 bg-ink-900/75 backdrop-blur-md transition-[height] duration-500 ${
-            tab === "recon" || tab === "kernel" ? "h-[420px]" : "h-[258px]"
+            tab === "recon" || tab === "kernel" || tab === "taste" ? "h-[420px]" : "h-[258px]"
           }`}
         >
           <DockBar
@@ -1908,9 +1967,21 @@ function AppInner() {
                   addLog("forge field cleared");
                 }}
                 accent={persona.accent}
+                palette={tasteProfile.palette}
               />
             )}
             {tab === "kernel" && <KernelPanel accent={persona.accent} onEvent={addLog} />}
+            {tab === "taste" && (
+              <TastePanel
+                profile={tasteProfile}
+                accent={persona.accent}
+                onApply={(id) => {
+                  taste.set(id);
+                  addLog(`taste: doctrine → ${taste.active().name}`);
+                }}
+                onEvent={addLog}
+              />
+            )}
             {tab === "recon" && (
               <div className="flex h-full min-h-0 flex-col">
                 {/* phase toggle: reference board (phase 1) → premodel gate (phase 2) */}

@@ -12,6 +12,10 @@ import { BPM_RANGE, PROGS, SWING, TITLES } from "./musicEngine";
 import type { Genre } from "./musicEngine";
 import { INTENT_SYNONYMS } from "./chatEngine";
 import type { Intent } from "./chatEngine";
+import { taste } from "./taste";
+
+const tasteActiveId = () => taste.active().id;
+const tasteSet = (id: string) => taste.set(id);
 import { PERSONAS } from "./personas";
 import type { PersonaId } from "./personas";
 
@@ -131,6 +135,19 @@ for (const intent of Object.keys(INTENT_SYNONYMS) as Intent[]) {
   arrayPushParam(`intent.${intent}`, `“${intent}” vocabulary`, "text", () => INTENT_SYNONYMS[intent], (v) =>
     typeof v === "string" && v.trim().length >= 2 ? null : "need a phrase (2+ chars)");
 }
+
+SCHEMA.push({
+  path: "taste.profile",
+  kind: "text",
+  label: "active design doctrine",
+  ops: ["set"],
+  get: () => tasteActiveId(),
+  set: (v) => { tasteSet(String(v)); },
+  validate: (v) =>
+    typeof v === "string" && ["signal", "editorial", "cinema", "brutal", "organic", "terminal"].includes(v)
+      ? null
+      : "need a profile id: signal|editorial|cinema|brutal|organic|terminal",
+});
 
 numberParam("scene.maxObjects", "object field capacity", "scene.maxObjects", 4, 96);
 numberParam("avatar.idleSpin", "core idle spin", "avatar.idleSpin", 0.05, 3);

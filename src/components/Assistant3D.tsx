@@ -7,6 +7,7 @@ import type { Mood, Persona } from "../lib/personas";
 import { alpha } from "../lib/personas";
 import { engine } from "../lib/musicEngine";
 import { kernelNum } from "../lib/kernel";
+import { profileFinish } from "../lib/taste";
 import type { HandFrame } from "../lib/hands";
 import type { PinnedImage, SceneObject, ShapeKind } from "../lib/sceneTypes";
 
@@ -368,10 +369,10 @@ function ForgeObject({
         <meshStandardMaterial
           color={obj.color}
           emissive={obj.color}
-          emissiveIntensity={0.16}
-          metalness={0.38}
-          roughness={0.26}
-          flatShading={obj.shape === "gem" || obj.shape === "cube"}
+          emissiveIntensity={profileFinish().emissive}
+          metalness={profileFinish().metal}
+          roughness={profileFinish().rough}
+          flatShading={profileFinish().flat || obj.shape === "gem" || obj.shape === "cube"}
         />
       </mesh>
       <mesh scale={1.07}>

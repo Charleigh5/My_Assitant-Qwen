@@ -334,20 +334,32 @@ export interface FeedDef {
 export const FEEDS: FeedDef[] = [
   {
     id: "f1",
-    label: "CAM 01 · FIELD UNIT",
-    loc: "linked demo stream",
-    src: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+    label: "DW NEWS · BERLIN",
+    loc: "global newsroom — live HLS",
+    src: "https://dwamdstream102.akamaized.net/hls/live/2015525/dwstream102/index.m3u8",
   },
   {
     id: "f2",
-    label: "CAM 02 · PERIMETER",
-    loc: "linked demo stream",
-    src: "https://cph-p2p-msl.akamaized.net/hls/live/2000341/test/master.m3u8",
+    label: "AL JAZEERA EN · DOHA",
+    loc: "live broadcast — public HLS",
+    src: "https://live-hls-web-aje.getaj.net/AJE/index.m3u8",
   },
   {
     id: "f3",
-    label: "CAM 03 · ARCHIVE LOOP",
-    loc: "linked demo stream",
-    src: "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8",
+    label: "FRANCE 24 EN · PARIS",
+    loc: "live broadcast — public HLS",
+    src: "https://static.france24.com/live/F24_EN_HI_HLS/live_web.m3u8",
+  },
+  {
+    id: "f4",
+    label: "CGTN · BEIJING",
+    loc: "live broadcast — public HLS",
+    src: "https://live.cgtn.com/1000/prog_index.m3u8",
+  },
+  {
+    id: "cam",
+    label: "LOCAL OPTICS · YOUR CAMERA",
+    loc: "barehands sensor link — getUserMedia",
+    src: "",
   },
 ];

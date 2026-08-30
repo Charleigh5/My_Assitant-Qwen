@@ -1277,7 +1277,7 @@ function AppInner() {
   return (
     <div
       className="relative flex h-screen w-full flex-col overflow-hidden font-body text-mist-100"
-      style={{ "--acc": persona.accent } as CSSProperties}
+      style={{ "--acc": persona.accent, height: "100dvh" } as CSSProperties}
     >
       {/* ambient backdrop */}
       <div className="pointer-events-none absolute inset-0 z-0">
@@ -1305,14 +1305,14 @@ function AppInner() {
           </svg>
           <div className="leading-none">
             <h1 className="font-display text-[13px] font-extrabold tracking-[0.3em] text-mist-100">ORBIT</h1>
-            <p className="mt-0.5 font-mono text-[6.5px] tracking-[0.24em] text-mist-600">FULLSTACK AGENT CONSOLE</p>
+            <p className="mt-0.5 hidden font-mono text-[6.5px] tracking-[0.24em] text-mist-600 sm:block">FULLSTACK AGENT CONSOLE</p>
           </div>
         </div>
 
         <div className="h-6 w-px bg-ink-700/80" />
 
         {/* persona cores */}
-        <div className="flex items-center gap-1">
+        <div className="no-scrollbar flex min-w-0 flex-1 items-center gap-1 overflow-x-auto lg:flex-none">
           {PERSONAS.map((p) => {
             const active = p.id === personaId;
             return (
@@ -1336,7 +1336,7 @@ function AppInner() {
           })}
         </div>
 
-        <div className="min-w-0 flex-1" />
+        <div className="hidden min-w-0 flex-1 lg:block" />
 
         {/* live status cluster */}
         <div className="hidden items-center gap-1.5 lg:flex">
@@ -1385,8 +1385,8 @@ function AppInner() {
           )}
         </div>
 
-        <div className="h-6 w-px bg-ink-700/80" />
-        <UtcClock accent={persona.accent} />
+        <div className="hidden h-6 w-px bg-ink-700/80 md:block" />
+        <div className="hidden md:block"><UtcClock accent={persona.accent} /></div>
       </header>
 
       {/* LEGACY left rail — neutralized: layout is now full-viewport + HUD rail */}
@@ -1783,7 +1783,7 @@ function AppInner() {
           <div
             className={`absolute flex flex-col ${
               viewMode === "gods"
-                ? "pip-in origin-bottom-right bottom-4 right-16 z-40 h-[244px] w-[348px] border bg-ink-900/95"
+                ? "pip-in origin-bottom-right bottom-[92px] right-2 z-40 h-[176px] w-[248px] border bg-ink-900/95 lg:bottom-4 lg:right-16 lg:h-[244px] lg:w-[348px]"
                 : "inset-0"
             }`}
             style={
@@ -1935,7 +1935,7 @@ function AppInner() {
                 setViewMode("core");
                 addLog("god's eye: deck closed");
               }}
-              className="absolute right-16 top-5 z-30 flex items-center gap-2 border px-3 py-2 font-mono text-[9px] tracking-[0.22em] transition-all hover:-translate-y-0.5"
+              className="absolute right-3 top-14 z-30 flex items-center gap-2 border px-3 py-2 font-mono text-[9px] tracking-[0.22em] transition-all hover:-translate-y-0.5 lg:right-16 lg:top-5"
               style={{
                 borderColor: alpha(persona.accent, 0.55),
                 color: persona.accent,
@@ -2007,7 +2007,7 @@ function AppInner() {
           </div>
 
           {/* control hint */}
-          <p className="pointer-events-none absolute bottom-4 left-1/2 z-10 -translate-x-1/2 font-mono text-[7.5px] tracking-[0.2em] text-mist-600">
+          <p className="pointer-events-none absolute bottom-4 left-1/2 z-10 hidden -translate-x-1/2 font-mono text-[7.5px] tracking-[0.2em] text-mist-600 md:block">
             DRAG ORBIT · SPACE · PLAY/STOP · {handsStatus === "active" ? "PINCH GRABS OBJECTS" : "“HANDS ON” FOR WEBCAM CONTROL"}
           </p>
 
@@ -2283,7 +2283,7 @@ function AppInner() {
         <button
           key={log.length}
           onClick={() => setTab("log")}
-          className="ticker-in absolute bottom-4 left-5 z-20 flex max-w-[46%] items-center gap-2 border border-ink-700/70 bg-ink-950/70 px-2.5 py-1.5 text-left backdrop-blur-sm transition-colors hover:border-mist-600"
+          className="ticker-in absolute bottom-[88px] left-3 z-20 flex max-w-[70%] items-center gap-2 border border-ink-700/70 bg-ink-950/70 px-2.5 py-1.5 text-left backdrop-blur-sm transition-colors hover:border-mist-600 lg:bottom-4 lg:left-5 lg:max-w-[46%]"
           title="Open event log"
         >
           <span className="pulse-dot h-1 w-1 shrink-0 rounded-full" style={{ background: persona.accent }} />

@@ -317,7 +317,7 @@ export function ObjectForge({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [palette]);
   return (
-    <div className="flex h-full gap-4 p-2.5">
+    <div className="flex h-full flex-col gap-3 overflow-y-auto p-2.5 sm:flex-row sm:gap-4 sm:overflow-visible">
       <div className="flex flex-col gap-2">
         <span className="font-mono text-[8px] tracking-[0.22em] text-mist-500">MATERIAL</span>
         <div className="flex flex-wrap gap-1.5" style={{ maxWidth: 150 }}>
@@ -344,13 +344,13 @@ export function ObjectForge({
         </button>
       </div>
 
-      <div className="h-full w-px bg-ink-700/70" />
+      <div className="hidden h-full w-px bg-ink-700/70 sm:block" />
 
       <div className="flex flex-1 flex-col gap-1.5 overflow-hidden">
         <span className="font-mono text-[8px] tracking-[0.22em] text-mist-500">
           FORGE A PRIMITIVE — <span style={{ color: accent }}>CLICK TO DEPLOY</span>
         </span>
-        <div className="grid flex-1 grid-cols-7 content-start gap-1.5">
+        <div className="grid flex-1 grid-cols-4 content-start gap-1.5 sm:grid-cols-7">
           {SHAPE_KINDS.map((k) => (
             <button
               key={k}
@@ -483,7 +483,7 @@ export function TastePanel({
 
         <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-2.5">
           {/* locks + bans */}
-          <div className="grid grid-cols-2 gap-2.5">
+          <div className="grid grid-cols-1 gap-2.5 min-[420px]:grid-cols-2">
             <div className="border border-ink-700/60 bg-ink-900/40">
               <p className="border-b border-ink-700/60 px-2 py-1 font-mono text-[7.5px] tracking-[0.24em] text-lyra">◈ LOCKS — ALWAYS</p>
               <ul className="space-y-1 p-2">
@@ -520,7 +520,7 @@ export function TastePanel({
           </div>
 
           {/* three + type + motion */}
-          <div className="grid grid-cols-3 gap-2.5">
+          <div className="grid grid-cols-2 gap-2.5 min-[520px]:grid-cols-3">
             <div className="border border-ink-700/60 bg-ink-900/40 p-2">
               <p className="font-mono text-[7px] tracking-[0.22em] text-mist-600">3D DOCTRINE · {profile.three.finish.toUpperCase()}</p>
               <p className="mt-1 font-mono text-[8px] leading-snug text-mist-300">{profile.three.geometry}</p>

@@ -1,9 +1,9 @@
 /**
- * HUD RAIL — the console's icon rail + flyout module system.
- * The assistant owns the full viewport; every module lives behind an
- * icon. One flyout at a time; backdrop click or ESC closes it.
+ * HUD RAIL — icon rail + flyout modules (desktop) and bottom tab bar +
+ * bottom sheets (mobile). One module open at a time; backdrop, ESC,
+ * swipe-down, or the close control dismisses it.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 export type FlyoutId =
@@ -16,11 +16,13 @@ export type FlyoutId =
   | "taste"
   | "log";
 
+const MOBILE_PRIMARY: FlyoutId[] = ["chat", "studio", "forge", "gallery"];
+
 /* ---------- inline icon set ---------- */
 
 const S = { fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
-export const RailIcon = ({ id, size = 18 }: { id: FlyoutId | "hands" | "mic" | "voice" | "eye" | "broadcast" | "close"; size?: number }) => {
+export const RailIcon = ({ id, size = 18 }: { id: FlyoutId | "hands" | "mic" | "voice" | "eye" | "broadcast" | "close" | "more"; size?: number }) => {
   switch (id) {
     case "chat":
       return (
@@ -117,6 +119,14 @@ export const RailIcon = ({ id, size = 18 }: { id: FlyoutId | "hands" | "mic" | "
           <path d="M7.8 16.2a6 6 0 0 1 0-8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 19a10 10 0 0 1 0-14M19 5a10 10 0 0 1 0 14" />
         </svg>
       );
+    case "more":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" {...S} aria-hidden>
+          <circle cx="5" cy="12" r="1.4" fill="currentColor" />
+          <circle cx="12" cy="12" r="1.4" fill="currentColor" />
+          <circle cx="19" cy="12" r="1.4" fill="currentColor" />
+        </svg>
+      );
     case "close":
       return (
         <svg width={size} height={size} viewBox="0 0 24 24" {...S} aria-hidden>
@@ -126,7 +136,7 @@ export const RailIcon = ({ id, size = 18 }: { id: FlyoutId | "hands" | "mic" | "
   }
 };
 
-/* ---------- flyout titles ---------- */
+/* ---------- flyout titles + widths ---------- */
 
 const TITLES: Record<FlyoutId, string> = {
   chat: "COMMS CHANNEL",
@@ -168,7 +178,36 @@ export function UtcClock({ accent }: { accent: string }) {
   );
 }
 
-/* ---------- rail ---------- */
+/* ---------- breakpoint + keyboard hooks ---------- */
+
+function useIsMobile() {
+  const [mobile, setMobile] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1023px)");
+    const fn = () => setMobile(mq.matches);
+    mq.addEventListener("change", fn);
+    return () => mq.removeEventListener("change", fn);
+  }, []);
+  return mobile;
+}
+
+/** extra inset when the on-screen keyboard is open (mobile) */
+function useKeyboardInset(enabled: boolean) {
+  const [inset, setInset] = useState(0);
+  useEffect(() => {
+    if (!enabled || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    const fn = () => setInset(Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)));
+    fn();
+    vv.addEventListener("resize", fn);
+    return () => vv.removeEventListener("resize", fn);
+  }, [enabled]);
+  return inset;
+}
+
+/* ---------- items ---------- */
 
 interface RailItem {
   id: FlyoutId;
@@ -183,6 +222,20 @@ interface ToggleItem {
   on: boolean;
   disabled?: boolean;
   onClick: () => void;
+}
+
+function MiniSwitch({ on, accent }: { on: boolean; accent: string }) {
+  return (
+    <span
+      className="relative inline-block h-[18px] w-[34px] shrink-0 rounded-full border transition-colors duration-300"
+      style={{ background: on ? `color-mix(in srgb, ${accent} 28%, transparent)` : "#13222a", borderColor: on ? accent : "#2f4c59" }}
+    >
+      <span
+        className="absolute top-[2.5px] h-[11px] w-[11px] rounded-full transition-all duration-300"
+        style={{ left: on ? 18 : 3, background: on ? accent : "#66868a", boxShadow: on ? `0 0 8px ${accent}` : "none" }}
+      />
+    </span>
+  );
 }
 
 export default function HudRail({
@@ -200,29 +253,66 @@ export default function HudRail({
   toggles: ToggleItem[];
   children: ReactNode;
 }) {
-  /* ESC closes */
+  const isMobile = useIsMobile();
+  const kbInset = useKeyboardInset(isMobile);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const dragY = useRef(0);
+  const dragStart = useRef<number | null>(null);
+  const [dragging, setDragging] = useState(0);
+
+  /* ESC closes everything */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setFlyout(null);
+      if (e.key === "Escape") {
+        setFlyout(null);
+        setMoreOpen(false);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [setFlyout]);
 
+  useEffect(() => setMoreOpen(false), [flyout]);
+
   const open = flyout !== null;
+  const primary = items.filter((i) => MOBILE_PRIMARY.includes(i.id));
+  const secondary = items.filter((i) => !MOBILE_PRIMARY.includes(i.id));
+  const moreBadge = secondary.reduce((n, i) => n + (i.badge ?? 0), 0);
+
+  const close = () => {
+    setFlyout(null);
+    setMoreOpen(false);
+  };
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    dragStart.current = e.touches[0].clientY;
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (dragStart.current == null) return;
+    dragY.current = Math.max(0, e.touches[0].clientY - dragStart.current);
+    setDragging(dragY.current);
+  };
+  const onTouchEnd = () => {
+    if (dragY.current > 90) close();
+    dragY.current = 0;
+    dragStart.current = null;
+    setDragging(0);
+  };
+
+  const borderColor = `color-mix(in srgb, ${accent} 45%, #213843)`;
 
   return (
     <>
       {/* click-away backdrop */}
       <div
-        className={`absolute inset-0 z-[55] transition-opacity duration-200 ${open ? "opacity-100" : "pointer-events-none opacity-0"}`}
-        style={{ background: "rgba(8,14,17,0.28)" }}
-        onPointerDown={() => setFlyout(null)}
+        className={`absolute inset-0 z-[55] transition-opacity duration-200 ${open || moreOpen ? "opacity-100" : "pointer-events-none opacity-0"}`}
+        style={{ background: "rgba(8,14,17,0.32)" }}
+        onPointerDown={close}
         aria-hidden
       />
 
-      {/* icon rail */}
-      <div className="absolute right-3 top-1/2 z-[60] flex -translate-y-1/2 flex-col items-center gap-1">
+      {/* ============ DESKTOP · icon rail ============ */}
+      <div className="absolute right-3 top-1/2 z-[60] hidden -translate-y-1/2 flex-col items-center gap-1 lg:flex">
         <div className="flex flex-col gap-1 border border-ink-700/70 bg-ink-900/85 p-1 backdrop-blur-md" style={{ boxShadow: "0 18px 44px -18px rgba(0,0,0,0.8)" }}>
           {items.map((it, i) => {
             const active = flyout === it.id;
@@ -243,22 +333,12 @@ export default function HudRail({
                 >
                   <RailIcon id={it.id} />
                   {typeof it.badge === "number" && it.badge > 0 && !active && (
-                    <span
-                      className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full px-0.5 font-mono text-[7px] font-bold text-ink-950"
-                      style={{ background: accent }}
-                    >
+                    <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full px-0.5 font-mono text-[7px] font-bold text-ink-950" style={{ background: accent }}>
                       {it.badge > 9 ? "9+" : it.badge}
                     </span>
                   )}
-                  {/* active notch */}
-                  <span
-                    className="absolute -right-[5px] top-1/2 h-4 w-[3px] -translate-y-1/2 transition-opacity"
-                    style={{ background: accent, opacity: active ? 1 : 0, boxShadow: `0 0 8px ${accent}` }}
-                  />
-                  {/* hover tooltip */}
-                  <span
-                    className="pointer-events-none absolute right-full top-1/2 mr-2 -translate-y-1/2 whitespace-nowrap border border-ink-700 bg-ink-950/95 px-2 py-1 font-mono text-[8px] tracking-[0.18em] text-mist-300 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
-                  >
+                  <span className="absolute -right-[5px] top-1/2 h-4 w-[3px] -translate-y-1/2 transition-opacity" style={{ background: accent, opacity: active ? 1 : 0, boxShadow: `0 0 8px ${accent}` }} />
+                  <span className="pointer-events-none absolute right-full top-1/2 mr-2 -translate-y-1/2 whitespace-nowrap border border-ink-700 bg-ink-950/95 px-2 py-1 font-mono text-[8px] tracking-[0.18em] text-mist-300 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
                     {it.label.toUpperCase()}
                   </span>
                 </button>
@@ -269,7 +349,7 @@ export default function HudRail({
 
         <div className="mt-1 flex flex-col gap-1 border border-ink-700/70 bg-ink-900/85 p-1 backdrop-blur-md" style={{ boxShadow: "0 18px 44px -18px rgba(0,0,0,0.8)" }}>
           {toggles.map((t) => (
-            <div key={t.id} className="relative group">
+            <div key={t.id} className="group relative">
               <button
                 onClick={t.onClick}
                 disabled={t.disabled}
@@ -291,44 +371,133 @@ export default function HudRail({
         </div>
       </div>
 
-      {/* flyout panel */}
+      {/* ============ MOBILE · bottom tab bar ============ */}
+      <nav
+        className="absolute inset-x-0 bottom-0 z-[58] grid grid-cols-5 border-t border-ink-700/70 bg-ink-900/92 backdrop-blur-md lg:hidden"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+        aria-label="Primary modules"
+      >
+        {primary.map((it) => {
+          const active = flyout === it.id;
+          return (
+            <button
+              key={it.id}
+              onClick={() => setFlyout(active ? null : it.id)}
+              className={`relative flex flex-col items-center gap-1 pb-2 pt-2.5 transition-colors ${it.pulse && !active ? "pulse-dot" : ""}`}
+              style={{ color: active ? accent : "#8cacac" }}
+            >
+              <span
+                className="absolute inset-x-4 top-0 h-[2px] transition-all duration-300"
+                style={{ background: active ? accent : "transparent", boxShadow: active ? `0 0 10px ${accent}` : "none" }}
+              />
+              <RailIcon id={it.id} size={19} />
+              <span className="font-mono text-[7px] font-bold tracking-[0.16em]">{TITLES[it.id].split(" ")[0]}</span>
+              {typeof it.badge === "number" && it.badge > 0 && !active && (
+                <span className="absolute right-1/2 top-1 flex h-3.5 min-w-3.5 translate-x-4 items-center justify-center rounded-full px-0.5 font-mono text-[7px] font-bold text-ink-950" style={{ background: accent }}>
+                  {it.badge > 9 ? "9+" : it.badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
+        <button
+          onClick={() => setMoreOpen((v) => !v)}
+          className="relative flex flex-col items-center gap-1 pb-2 pt-2.5 transition-colors"
+          style={{ color: moreOpen ? accent : "#8cacac" }}
+        >
+          <span className="absolute inset-x-4 top-0 h-[2px] transition-all duration-300" style={{ background: moreOpen ? accent : "transparent" }} />
+          <RailIcon id="more" size={19} />
+          <span className="font-mono text-[7px] font-bold tracking-[0.16em]">MORE</span>
+          {moreBadge > 0 && !moreOpen && (
+            <span className="absolute right-1/2 top-1 flex h-3.5 min-w-3.5 translate-x-4 items-center justify-center rounded-full px-0.5 font-mono text-[7px] font-bold text-ink-950" style={{ background: accent }}>
+              {moreBadge}
+            </span>
+          )}
+        </button>
+      </nav>
+
+      {/* ============ MOBILE · more sheet ============ */}
+      {moreOpen && isMobile && (
+        <div className="sheet-in absolute inset-x-0 bottom-0 z-[60] border-t bg-ink-900/97 backdrop-blur-md lg:hidden" style={{ borderColor, paddingBottom: "calc(env(safe-area-inset-bottom) + 64px)" }}>
+          <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-ink-600" />
+          <p className="px-4 pb-1 pt-2 font-mono text-[8px] tracking-[0.24em] text-mist-600">MODULES</p>
+          <div className="grid grid-cols-4 gap-1.5 px-3">
+            {secondary.map((it) => (
+              <button
+                key={it.id}
+                onClick={() => setFlyout(it.id)}
+                className="flex flex-col items-center gap-1.5 border border-ink-700/60 bg-ink-850/50 px-1 py-3 transition-colors"
+                style={{ color: "#c2d8d6" }}
+              >
+                <RailIcon id={it.id} size={18} />
+                <span className="font-mono text-[7px] tracking-[0.14em]">{TITLES[it.id].split(" ")[0]}</span>
+                {typeof it.badge === "number" && it.badge > 0 && (
+                  <span className="-mt-1 rounded-full px-1 font-mono text-[7px] font-bold text-ink-950" style={{ background: accent }}>{it.badge}</span>
+                )}
+              </button>
+            ))}
+          </div>
+          <p className="px-4 pb-1 pt-3 font-mono text-[8px] tracking-[0.24em] text-mist-600">SYSTEM</p>
+          <div className="flex flex-col gap-1 px-3 pb-3">
+            {toggles.map((t) => (
+              <button
+                key={t.id}
+                onClick={t.onClick}
+                disabled={t.disabled}
+                className="flex items-center gap-3 border border-ink-700/50 bg-ink-850/40 px-3 py-2.5 transition-colors disabled:opacity-40"
+              >
+                <span style={{ color: t.on ? accent : "#8cacac" }}>
+                  <RailIcon id={t.id} size={17} />
+                </span>
+                <span className="flex-1 text-left font-mono text-[9px] tracking-[0.14em] text-mist-300">{t.label.toUpperCase()}</span>
+                <MiniSwitch on={t.on} accent={accent} />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ============ FLYOUT · anchored panel (desktop) / bottom sheet (mobile) ============ */}
       {open && (
         <div
           key={flyout}
-          className="flyout-in absolute right-[64px] top-1/2 z-[60] flex max-h-[86vh] -translate-y-1/2 flex-col border bg-ink-900/95 backdrop-blur-md"
+          className={
+            isMobile
+              ? "sheet-in absolute inset-x-0 bottom-0 z-[60] flex max-h-[88dvh] flex-col border-t bg-ink-900/97 backdrop-blur-md"
+              : `flyout-in absolute right-[64px] top-1/2 z-[60] flex max-h-[86vh] -translate-y-1/2 flex-col border bg-ink-900/95 backdrop-blur-md ${WIDTHS[flyout]}`
+          }
           style={{
-            borderColor: `color-mix(in srgb, ${accent} 45%, #213843)`,
-            boxShadow: `0 30px 80px -30px rgba(0,0,0,0.9), 0 0 40px -18px ${accent}`,
+            borderColor,
+            boxShadow: `0 30px 70px -24px rgba(0,0,0,0.85), 0 0 44px -18px ${accent}55`,
+            transform: isMobile && dragging > 0 ? `translateY(${dragging}px)` : undefined,
+            paddingBottom: isMobile ? `calc(env(safe-area-inset-bottom) + ${kbInset}px)` : undefined,
           }}
         >
-          {/* header */}
-          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-ink-700/70 px-3.5 py-2.5" style={{ background: `color-mix(in srgb, ${accent} 6%, transparent)` }}>
-            <div className="flex items-center gap-2">
-              <span className="pulse-dot h-1.5 w-1.5 rounded-full" style={{ background: accent }} />
-              <h2 className="font-display text-[10px] font-bold tracking-[0.24em] text-mist-100">{TITLES[flyout]}</h2>
+          {/* sheet handle (mobile) */}
+          {isMobile && (
+            <div className="flex shrink-0 cursor-grab touch-none justify-center pb-0.5 pt-2" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+              <div className="h-1 w-12 rounded-full" style={{ background: `color-mix(in srgb, ${accent} 45%, #213843)` }} />
+            </div>
+          )}
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-ink-700/60 px-4 py-2.5">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <span className="pulse-dot h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: accent }} />
+              <span className="truncate font-mono text-[9px] font-bold tracking-[0.24em]" style={{ color: accent }}>
+                {TITLES[flyout]}
+              </span>
             </div>
             <button
-              onClick={() => setFlyout(null)}
-              aria-label="Close panel"
-              className="border border-transparent p-1 text-mist-500 transition-colors hover:text-mist-100"
-              style={{ borderRadius: 2 }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = accent)}
-              onMouseLeave={(e) => (e.currentTarget.style.borderColor = "transparent")}
+              onClick={close}
+              aria-label="Close module"
+              className="shrink-0 border border-ink-600 p-1.5 text-mist-500 transition-all hover:-translate-y-px hover:text-mist-100 active:scale-95"
             >
-              <RailIcon id="close" size={13} />
+              <RailIcon id="close" size={12} />
             </button>
           </div>
-
-          {/* body */}
-          <div className={`flyout-body min-h-0 flex-1 overflow-hidden ${WIDTHS[flyout]}`}>{children}</div>
-
-          {/* footer rule */}
-          <div className="flex shrink-0 items-center justify-between border-t border-ink-700/70 px-3.5 py-1.5">
-            <span className="font-mono text-[7px] tracking-[0.2em] text-mist-600">CLICK OUTSIDE OR ESC TO CLOSE</span>
-            <span className="font-mono text-[7px] tracking-[0.2em]" style={{ color: accent }}>
-              ORBIT·OS
-            </span>
-          </div>
+          <div className="min-h-0 flex-1">{children}</div>
+          <p className="hidden shrink-0 border-t border-ink-700/40 px-4 py-1.5 font-mono text-[7px] tracking-[0.2em] text-mist-600 lg:block">
+            CLICK OUTSIDE OR ESC TO DISMISS
+          </p>
         </div>
       )}
     </>

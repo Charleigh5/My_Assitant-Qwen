@@ -679,7 +679,7 @@ export default function GodsEye({ active, accent, apiRef, onWeatherReport, onFoc
         </div>
 
         {/* coords + scale + attribution — bottom-left */}
-        <div className="absolute bottom-4 left-3 z-20 flex flex-col gap-1">
+        <div className="absolute bottom-[88px] left-3 z-20 flex flex-col gap-1 lg:bottom-4">
           <div className="flex items-center gap-3 border bg-ink-950/82 px-2.5 py-1.5 backdrop-blur-sm" style={{ borderColor: "#213843" }}>
             <span className="font-mono text-[9px] tracking-[0.14em] text-mist-300">{fmtCoord(coords.lat, coords.lon)}</span>
             <span className="font-mono text-[9px] text-mist-600">Z{coords.zoom.toFixed(1)}</span>
@@ -765,7 +765,7 @@ export default function GodsEye({ active, accent, apiRef, onWeatherReport, onFoc
           )}
 
           {/* transport — bottom-left (right side stays clear for the core PIP) */}
-          <div className="absolute bottom-4 left-3 z-20 flex max-w-[calc(100%-380px)] flex-col gap-1.5">
+          <div className="absolute bottom-[88px] left-3 z-20 flex max-w-[calc(100%-24px)] flex-col gap-1.5 lg:bottom-4 lg:max-w-[calc(100%-380px)]">
             <div className="flex gap-1">
               <button
                 onClick={() => setMuted((m) => !m)}
@@ -863,7 +863,7 @@ export default function GodsEye({ active, accent, apiRef, onWeatherReport, onFoc
 
       {/* ============ TELEMETRY DRAWER (respects the core PIP zone) ============ */}
       {drawer && (
-        <div className="absolute bottom-[268px] right-0 top-11 z-20 flex w-[252px] flex-col border-l bg-ink-900/95 backdrop-blur-sm" style={{ borderColor: alpha(accent, 0.3) }}>
+        <div className="absolute bottom-[96px] right-0 top-11 z-20 flex w-[252px] max-w-[82vw] flex-col border-l bg-ink-900/95 backdrop-blur-sm lg:bottom-[268px]" style={{ borderColor: alpha(accent, 0.3) }}>
           <div className="flex border-b border-ink-700/70">
             {([["wx", "WEATHER"], ["tel", "TELEMETRY"]] as ["wx" | "tel", string][]).map(([id, label]) => (
               <button

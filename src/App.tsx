@@ -801,9 +801,11 @@ function AppInner() {
         }
         case "stop":
           engine.stop();
+          stopSpeaking();
+          setSpeaking(false);
           setMood("idle");
           reply(simpleLine(pid, "stop"));
-          addLog("playback stopped");
+          addLog("playback + voice stopped");
           return;
         case "play": {
           if (trackRef.current && !engine.isPlaying) {
@@ -1339,7 +1341,22 @@ function AppInner() {
         {/* live status cluster */}
         <div className="hidden items-center gap-1.5 lg:flex">
           {track && (
-            <button onClick={() => setTab("studio")} title="Open Waveforge" className={`flex items-center gap-1.5 border px-2 py-1 transition-colors ${engine.isPlaying ? "" : "opacity-70"}`} style={{ borderColor: alpha(persona.accent, 0.4), background: alpha(persona.accent, 0.06) }}>
+            <button
+              onClick={() => {
+                if (engine.isPlaying) {
+                  engine.stop();
+                  setMood("idle");
+                  addLog("playback stopped from top bar");
+                } else {
+                  engine.play(track);
+                  setMood("djing");
+                  addLog("playback resumed from top bar");
+                }
+              }}
+              title={engine.isPlaying ? "Stop playback" : "Resume playback"}
+              className={`flex items-center gap-1.5 border px-2 py-1 transition-all hover:-translate-y-px ${engine.isPlaying ? "" : "opacity-70"}`}
+              style={{ borderColor: alpha(persona.accent, 0.4), background: alpha(persona.accent, 0.06) }}
+            >
               <span className={`flex h-2.5 items-end gap-[1.5px] ${engine.isPlaying ? "eq-live" : ""}`}>
                 {[0, 1, 2].map((i) => (
                   <span key={i} className="eq-bar w-[2px]" style={{ height: `${4 + i * 2}px`, background: persona.accent, animationDelay: `${i * 0.14}s` }} />
@@ -1351,9 +1368,9 @@ function AppInner() {
             </button>
           )}
           {ttsEngine && voiceOut && (
-            <span className="border px-1.5 py-1 font-mono text-[7.5px] tracking-[0.16em]" style={{ borderColor: ttsEngine.engine === "edge" ? "#9be15d66" : "#213843", color: ttsEngine.engine === "edge" ? "#9be15d" : "#8cacac" }} title="Speech engine">
+            <button onClick={toggleVoiceOut} className="border px-1.5 py-1 font-mono text-[7.5px] tracking-[0.16em] transition-all hover:-translate-y-px" style={{ borderColor: ttsEngine.engine === "edge" ? "#9be15d66" : "#213843", color: ttsEngine.engine === "edge" ? "#9be15d" : "#8cacac" }} title="Speech engine — click to mute agent voice">
               {ttsEngine.engine === "edge" ? "EDGE NEURAL" : "LOCAL VOICE"}
-            </span>
+            </button>
           )}
           {kernel.count() > 0 && (
             <button onClick={() => setTab("kernel")} className="border px-1.5 py-1 font-mono text-[7.5px] tracking-[0.16em] transition-colors" style={{ borderColor: alpha(persona.accent, 0.4), color: persona.accent }} title="Kernel patches live">
@@ -1361,10 +1378,10 @@ function AppInner() {
             </button>
           )}
           {handsOn && (
-            <span className="flex items-center gap-1 border px-1.5 py-1 font-mono text-[7.5px] tracking-[0.16em]" style={{ borderColor: alpha(persona.accent, 0.4), color: persona.accent }} title="Barehands tracking">
+            <button onClick={() => setHands(false)} className="flex items-center gap-1 border px-1.5 py-1 font-mono text-[7.5px] tracking-[0.16em] transition-all hover:-translate-y-px" style={{ borderColor: alpha(persona.accent, 0.4), color: persona.accent }} title="Barehands tracking — click to disengage">
               <span className={`h-1 w-1 rounded-full ${handsStatus === "active" ? "pulse-dot" : ""}`} style={{ background: persona.accent }} />
               HANDS
-            </span>
+            </button>
           )}
         </div>
 

@@ -391,12 +391,24 @@ class MusicEngine {
   }
 
   stop() {
-    if (!this.isPlaying) return;
+    // kill-switch: always runs, even if state drifted — and it must be SILENT,
+    // not just unscheduled. Suspending the context freezes the delay-feedback
+    // loop, pad releases and vinyl bed instantly; play() resumes on next start.
+    const wasPlaying = this.isPlaying;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.isPlaying = false;
     this.setVinyl(false);
-    this.stateListeners.forEach((cb) => cb(false));
+    if (this.ctx && this.ctx.state === "running") {
+      void this.ctx.suspend();
+    }
+    if (this.master && this.ctx) {
+      // instant perceptual mute in case suspend resolves late
+      this.master.gain.cancelScheduledValues(this.ctx.currentTime);
+      this.master.gain.setTargetAtTime(0, this.ctx.currentTime, 0.015);
+      this.master.gain.setTargetAtTime(this.pendingVolume, this.ctx.currentTime + 0.12, 0.05);
+    }
+    if (wasPlaying) this.stateListeners.forEach((cb) => cb(false));
   }
 
   setTrack(track: Track) {
